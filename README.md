@@ -1,23 +1,21 @@
-# Utter
+# VoxLang
 ### Voice-First Programming Language & IDE
 
-Utter is a programming language designed to be spoken aloud. Every keyword and construct sounds natural in conversation. It comes with a full browser-based IDE that transcribes your voice, converts it to Utter code via Claude, and lets you type to fix anything the mic gets wrong.
+VoxLang is a programming language designed to be spoken aloud. Every keyword and construct sounds natural in conversation. It comes with a full browser-based IDE that transcribes your voice, converts it to VoxLang code via Groq, and lets you type to fix anything the mic gets wrong.
 
 ---
 
 ## Quick Start
 
 ### 1. Clone & set up
-
 ```bash
-git clone <your-repo>
-cd utter
+git clone https://github.com/Arde-Eir/VoxLang.git
+cd VoxLang
 cp .env.example .env
-# Edit .env — add your ANTHROPIC_API_KEY and OPENAI_API_KEY
+# Edit .env — add your GROQ_API_KEY and DEEPGRAM_API_KEY
 ```
 
 ### 2. Run
-
 ```bash
 chmod +x run.sh
 ./run.sh
@@ -28,24 +26,29 @@ Then open **http://localhost:8000** in your browser.
 ---
 
 ## Project Structure
-
 ```
-utter/
+VoxLang/
 ├── backend/
+│   ├── __init__.py
 │   ├── main.py        # FastAPI server (REST + WebSocket)
-│   ├── stt.py         # Speech-to-text (Whisper / Deepgram)
-│   └── llm.py         # Claude integration
+│   ├── stt.py         # Speech-to-text (Deepgram)
+│   └── llm.py         # Groq integration
 ├── frontend/
+│   ├── __init__.py
 │   ├── index.html     # IDE UI
+│   ├── reference.html # Language reference UI
 │   ├── editor.js      # Monaco editor + voice integration
 │   └── voice.js       # Mic capture, noise filter, STT pipeline
 ├── shared/
-│   ├── grammar.py     # Utter lexer + parser (produces AST)
-│   ├── interpreter.py # Utter runtime / executor
+│   ├── __init__.py
+│   ├── codegen.py     # Code generation
+│   ├── config.py      # Environment config
+│   ├── grammar.py     # VoxLang lexer + parser (produces AST)
+│   ├── interpreter.py # VoxLang runtime / executor
+│   ├── optimizer.py   # Code optimizer
 │   ├── prompts.py     # All LLM system prompts
-│   └── config.py      # Environment config
+│   └── target.py      # Compilation targets
 ├── docs/
-│   ├── README.md      # This file
 │   └── LANGUAGE.md    # Full language reference
 ├── .env.example
 ├── requirements.txt
@@ -56,42 +59,39 @@ utter/
 
 ## API Keys Required
 
-| Key                  | Where to get it                        | Used for           |
-|----------------------|----------------------------------------|--------------------|
-| `ANTHROPIC_API_KEY`  | https://console.anthropic.com          | Code generation    |
-| `OPENAI_API_KEY`     | https://platform.openai.com/api-keys   | Whisper STT        |
-| `DEEPGRAM_API_KEY`   | https://console.deepgram.com           | Deepgram STT (opt) |
+| Key                 | Where to get it                   | Used for        |
+|---------------------|-----------------------------------|-----------------|
+| `GROQ_API_KEY`      | https://console.groq.com          | Code generation |
+| `DEEPGRAM_API_KEY`  | https://console.deepgram.com      | Voice STT       |
 
 ---
 
 ## How the Pipeline Works
-
 ```
-Mic → noise filter → STT (Whisper/Deepgram)
+Mic → noise filter → STT (Deepgram)
                   ↓
           confidence check
-          < 0.75 → Claude corrects transcript
+          < 0.75 → Groq corrects transcript
                   ↓
-          Claude converts to Utter code
+          Groq converts to VoxLang code
                   ↓
           Ghost text preview in Monaco
                   ↓
      Tab = accept │ Esc = dismiss │ type to override
                   ↓
-          Utter Lexer → Parser → AST → Interpreter
+          VoxLang Lexer → Parser → AST → Interpreter
                   ↓
               output console
 ```
 
 ---
 
-## The Utter Language
+## The VoxLang Language
 
-See [docs/LANGUAGE.md](LANGUAGE.md) for the full reference.
+See [docs/LANGUAGE.md](docs/LANGUAGE.md) for the full reference.
 
 Quick taste:
-
-```utter
+```voxlang
 note "Greet the user and count down"
 
 ask "What is your name?" into name
@@ -105,35 +105,6 @@ end
 
 say "Blast off!"
 ```
-
----
-
-## API Endpoints
-
-| Method | Path         | Description                          |
-|--------|--------------|--------------------------------------|
-| POST   | `/transcribe`| Audio → transcript + confidence      |
-| POST   | `/generate`  | Transcript → Utter code (Claude)     |
-| POST   | `/run`       | Utter code → execution output        |
-| POST   | `/explain`   | Code → plain English explanation     |
-| POST   | `/suggest`   | Partial code → completion suggestion |
-| POST   | `/chat`      | Freeform question about Utter        |
-| GET    | `/health`    | Health check                         |
-| WS     | `/ws/voice`  | Full voice pipeline over WebSocket   |
-
-Interactive docs: **http://localhost:8000/docs**
-
----
-
-## Day-by-Day Build Plan
-
-| Day | Goal |
-|-----|------|
-| 1 | STT working — mic → text in browser |
-| 2 | LLM layer — text → Utter code via Claude |
-| 3 | Monaco editor — voice + keyboard hybrid |
-| 4 | Voice commands — undo, delete, run, go to line |
-| 5 | Polish — test 10 programs, fix prompts |
 
 ---
 
