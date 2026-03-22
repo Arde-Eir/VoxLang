@@ -7,6 +7,7 @@ Phases 4-6 add IR generation, optimization, and target code on top.
 """
 
 import sys, os
+import re
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import base64
@@ -131,7 +132,7 @@ async def correct_stt(req: GenerateRequest):
 @app.post("/run")
 async def run_code(req: RunRequest):
     try:
-        # ── PHASE 1: LEXICAL ANALYSIS ─────────────────────────────────────────
+        #  PHASE 1: LEXICAL ANALYSIS 
         lexer  = Lexer(req.code)
         tokens = lexer.tokenize()
 
@@ -148,12 +149,12 @@ async def run_code(req: RunRequest):
                     "width": width,
                 })
 
-        # ── PHASE 2: SYNTAX ANALYSIS ──────────────────────────────────────────
+        #  PHASE 2: SYNTAX ANALYSIS 
         parser     = Parser(tokens)
         ast        = parser.parse()
         syntax_log = _build_syntax_log(ast)
 
-        # ── PHASE 3: SEMANTIC ANALYSIS + EXECUTION ────────────────────────────
+        #  PHASE 3: SEMANTIC ANALYSIS + EXECUTION 
         interp      = Interpreter()
         input_queue = list(req.input_values)
         input_index = [0]
@@ -185,9 +186,9 @@ async def run_code(req: RunRequest):
                 "target_log":   [],
             }
 
-        # ── PHASE 4: INTERMEDIATE CODE GENERATION ─────────────────────────────
-        ir_log = []
-        opt_log = []
+        #  PHASE 4: INTERMEDIATE CODE GENERATION 
+        ir_log     = []
+        opt_log    = []
         target_log = []
         try:
             cg = CodeGenerator()
@@ -196,7 +197,7 @@ async def run_code(req: RunRequest):
         except Exception:
             ir = []
 
-        # ── PHASE 5: OPTIMIZATION ─────────────────────────────────────────────
+        #  PHASE 5: OPTIMIZATION 
         try:
             opt    = Optimizer()
             opt_ir = opt.optimize(ir)
@@ -204,7 +205,7 @@ async def run_code(req: RunRequest):
         except Exception:
             opt_ir = ir
 
-        # ── PHASE 6: TARGET CODE GENERATION ──────────────────────────────────
+        #  PHASE 6: TARGET CODE GENERATION 
         try:
             sym_map = _build_sym_map(interp)
             tg = TargetGenerator(sym_map)
@@ -227,15 +228,18 @@ async def run_code(req: RunRequest):
         }
 
     except SyntaxError as e:
+        err_str    = str(e)
+        line_match = re.search(r'Line (\d+)', err_str)
+        err_line   = int(line_match.group(1)) if line_match else "—"
         return {
             "needs_input":  False,
-            "output":       [str(e)],
+            "output":       [err_str],
             "success":      False,
             "error":        "syntax",
             "token_log":    [],
             "syntax_log":   {
-                "nodes": [{"rule": "SYNTAX ERROR", "line": "—", "detail": str(e), "status": f"✗ {e}"}],
-                "recovery": [{"line": "—", "message": f"Syntax error: {e}", "recovery": "parsing halted"}],
+                "nodes":    [{"rule": "SYNTAX ERROR", "line": err_line, "detail": err_str, "status": f"✗ {e}"}],
+                "recovery": [{"line": err_line, "message": f"Syntax error: {err_str}", "recovery": "parsing halted"}],
             },
             "semantic_log": [],
             "trace_log":    [],
@@ -243,6 +247,7 @@ async def run_code(req: RunRequest):
             "opt_log":      [],
             "target_log":   [],
         }
+
     except Exception as e:
         return {
             "needs_input":  False,
@@ -325,9 +330,8 @@ async def voice_pipeline(ws: WebSocket):
         pass
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-# ── KILOS token classification ────────────────────────────────────────────────
+#  Helpers 
+#  KILOS token classification 
 _KW_OPERATORS = {
     "is", "not", "bigger", "smaller", "than", "equal", "at", "least", "most",
     "and", "or", "also", "either", "plus", "minus", "times", "divided",
@@ -378,7 +382,7 @@ def _token_width(t):
     return w
 
 
-# ── Syntax log ────────────────────────────────────────────────────────────────
+#  Syntax log 
 _NODE_HUMAN = {
     "StoreNode":      "Store (variable assign)",
     "UpdateNode":     "Update (reassign)",
@@ -454,7 +458,7 @@ def _build_syntax_log(ast) -> dict:
     return {"nodes": log, "recovery": recovery}
 
 
-# ── Scope helpers ─────────────────────────────────────────────────────────────
+#  Scope helpers 
 def _scope_level(scope_name: str) -> int:
     """Convert a scope name to a nesting depth integer.
     global=0, function:X=1, loop/when/foreach=2+
@@ -467,7 +471,7 @@ def _scope_level(scope_name: str) -> int:
     return min(len(parts), 4)
 
 
-# ── Byte size helpers ─────────────────────────────────────────────────────────
+#  Byte size helpers 
 def _type_bytes(entry) -> int:
     from decimal import Decimal
     v = entry.value
@@ -532,7 +536,7 @@ _SCOPE_BUDGET = {
 }
 
 
-# ── Semantic log ──────────────────────────────────────────────────────────────
+#  Semantic log 
 def _build_semantic_log(interp) -> list:
     """Build the semantic log from interp._symbol_log_list — the persistent
     log that captures ALL variables including locals inside functions and loops
@@ -544,14 +548,9 @@ def _build_semantic_log(interp) -> list:
     scope_used    = {}   # scope_name → total bytes used
 
     for sym in interp._symbol_log_list:
-        # sym keys: name, type, value, scope, scope_level, line
         scope_key = sym["scope"]
         vtype     = sym["type"]
 
-        # Try to get accurate byte size from the live global entry first.
-        # Local variables (functions/loops) are gone by now — fall back to
-        # estimation from type string. Either way nothing is hardcoded to
-        # the language's specific types.
         live_entry = interp.global_env.get_entry(sym["name"])
         if live_entry and not isinstance(live_entry.value, BuildNode):
             nbytes = _type_bytes(live_entry)
@@ -559,7 +558,6 @@ def _build_semantic_log(interp) -> list:
         else:
             nbytes, label = _estimate_from_type(vtype, sym.get("value", ""))
 
-        # Offset counter resets to 0 for each new scope
         if scope_key not in scope_offsets:
             scope_offsets[scope_key] = 0
 
@@ -577,7 +575,7 @@ def _build_semantic_log(interp) -> list:
         scope_offsets[scope_key] += nbytes
         scope_used[scope_key] = scope_used.get(scope_key, 0) + nbytes
 
-    # ── Per-scope memory summary ──────────────────────────────────────────────
+    #  Per-scope memory summary 
     scope_summary = []
     for scope_name, used in sorted(scope_used.items()):
         level  = _scope_level(scope_name)
@@ -604,7 +602,7 @@ def _build_semantic_log(interp) -> list:
     return result
 
 
-# ── Symbol map for target generator ──────────────────────────────────────────
+#  Symbol map for target generator 
 def _build_sym_map(interp: Interpreter) -> dict:
     """Convert the interpreter's global symbol table into the simple dict
     that TargetGenerator expects."""
@@ -633,7 +631,7 @@ class _SymProxy:
         return str(self._value) if self._value is not None else "nothing"
 
 
-# ── Static file serving ───────────────────────────────────────────────────────
+#  Static file serving 
 if os.path.exists(frontend_dir):
     reference_file = os.path.join(frontend_dir, "reference.html")
 

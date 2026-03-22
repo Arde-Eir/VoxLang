@@ -181,10 +181,8 @@ class Interpreter:
             "scope":       entry.scope,
             "scope_level": self._scope_level(entry.scope),
             "line":        str(entry.line),
-            # offset and width are filled later in _build_semantic_log
         }
         if key in self._symbol_log_index:
-            # Update in place — keep position, refresh value/type
             self._symbol_log_list[self._symbol_log_index[key]] = sym
         else:
             self._symbol_log_index[key] = len(self._symbol_log_list)
@@ -244,6 +242,9 @@ class Interpreter:
                 if isinstance(node, StoreNode):
                     scope.add(node.name)
                     scan_expr(node.value, scope)
+                elif isinstance(node, InputNode):
+                    # ── FIX: ask/hear defines the variable it saves into ──────
+                    scope.add(node.into)
                 elif isinstance(node, UpdateNode):
                     if node.name not in scope:
                         warnings.append(
@@ -283,11 +284,9 @@ class Interpreter:
                     scan(node.then_block, set(scope))
                     scan(node.else_block, set(scope))
                 elif isinstance(node, SolveNode):
-                    # solve defines the variable (and var2 for quadratic)
                     scope.add(node.var)
                     scope.add(node.var + "2")
                 elif isinstance(node, CaptureNode):
-                    # store result of func with ... into myVar defines myVar
                     scope.add(node.name)
                 elif isinstance(node, MathBlockNode):
                     scan(node.body, scope)
@@ -380,7 +379,6 @@ class Interpreter:
                         entry.precise = True
             else:
                 env.set(node.name, val, node.precise, getattr(node, "line", 0))
-            # ── Record into persistent symbol log ──────────────────────────
             entry = env.get_entry(node.name)
             if entry:
                 self._record_symbol(entry)
@@ -509,7 +507,6 @@ class Interpreter:
             for i in range(count):
                 child = Environment(env, scope_name=f"loop:{i+1}")
                 child.set("index", i + 1)
-                # Record the auto-created index variable
                 self._record_symbol(child.vars["index"])
                 self.trace_log.append(f"{indent}  → iteration {i+1} of {count}")
                 self._exec_block(node.body, child)
@@ -526,7 +523,6 @@ class Interpreter:
             for i, item in enumerate(lst):
                 child = Environment(env, scope_name=f"foreach:{node.iterable}")
                 child.set(node.var, item, line=getattr(node, "line", 0))
-                # Record the loop variable at each iteration (overwrites prev)
                 self._record_symbol(child.vars[node.var])
                 self.trace_log.append(f"{indent}  → {node.var} = {self._display(item)}")
                 self._exec_block(node.body, child)
@@ -632,7 +628,6 @@ class Interpreter:
         child = Environment(self.global_env, scope_name=f"function:{name}", is_function=True)
         for p, v in zip(fn.params, args):
             child.set(p, v)
-            # ── Record function parameters into persistent symbol log ──────
             self._record_symbol(child.vars[p])
 
         try:
@@ -762,30 +757,81 @@ class Interpreter:
         var    = node.var
         tokens = node.lhs_tokens
         rhs    = self._eval(node.rhs, env)
-        coeff2 = 0.0; coeff1 = 1.0; const = 0.0
+        coeff2 = 0.0; coeff1 = 0.0; const = 0.0
         i = 0
+
+        def _skip_times(idx):
+            """Skip over optional * or 'times' at idx; return new idx."""
+            if idx < len(tokens) and tokens[idx].value in ("*", "times"):
+                return idx + 1
+            return idx
+
+        def _is_coeff_var_squared(idx):
+            if tokens[idx].type != "NUMBER": return False
+            n = _skip_times(idx + 1)
+            if n >= len(tokens) or tokens[n].value != var: return False
+            n2 = n + 1
+            return n2 < len(tokens) and tokens[n2].value in ("squared", "^")
+
+        def _is_coeff_var(idx):
+            if tokens[idx].type != "NUMBER": return False
+            n = _skip_times(idx + 1)
+            if n >= len(tokens) or tokens[n].value != var: return False
+            n2 = n + 1
+            return not (n2 < len(tokens) and tokens[n2].value in ("squared", "^"))
+
+        def _len_coeff_var_squared(idx):
+            n = _skip_times(idx + 1)
+            return (n + 2) - idx   # var + squared
+
+        def _len_coeff_var(idx):
+            n = _skip_times(idx + 1)
+            return (n + 1) - idx   # var
+
         while i < len(tokens):
             t = tokens[i]
-            if t.type == "NUMBER" and i + 2 < len(tokens) \
-                    and tokens[i+1].value == "*" \
-                    and tokens[i+2].value == var:
-                if i + 3 < len(tokens) and tokens[i+3].value in ("squared", "^"):
-                    coeff2 = float(t.value); i += 4; continue
-                else:
-                    coeff1 = float(t.value); i += 3; continue
+
+            # NUMBER [* | times] var [squared | ^]
+            if _is_coeff_var_squared(i):
+                coeff2 += float(t.value)
+                i += _len_coeff_var_squared(i); continue
+
+            # NUMBER [* | times] var
+            if _is_coeff_var(i):
+                coeff1 += float(t.value)
+                i += _len_coeff_var(i); continue
+
+            # var squared
             if t.value == var:
-                if i + 1 < len(tokens) and tokens[i+1].value == "squared":
-                    coeff2 = 1.0; i += 2; continue
+                if i + 1 < len(tokens) and tokens[i+1].value in ("squared", "^"):
+                    coeff2 += 1.0; i += 2; continue
                 else:
-                    i += 1; continue
-            if t.value == "+" and i + 1 < len(tokens) and tokens[i+1].type == "NUMBER":
-                const += float(tokens[i+1].value); i += 2; continue
-            if t.value == "-" and i + 1 < len(tokens) and tokens[i+1].type == "NUMBER":
-                const -= float(tokens[i+1].value); i += 2; continue
-            if t.value == "plus" and i + 1 < len(tokens) and tokens[i+1].type == "NUMBER":
-                const += float(tokens[i+1].value); i += 2; continue
-            if t.value == "minus" and i + 1 < len(tokens) and tokens[i+1].type == "NUMBER":
-                const -= float(tokens[i+1].value); i += 2; continue
+                    coeff1 += 1.0; i += 1; continue
+
+            # plus / +
+            if t.value in ("plus", "+") and i + 1 < len(tokens):
+                nxt_i = i + 1
+                if tokens[nxt_i].type == "NUMBER":
+                    if _is_coeff_var_squared(nxt_i):
+                        coeff2 += float(tokens[nxt_i].value)
+                        i = nxt_i + _len_coeff_var_squared(nxt_i); continue
+                    if _is_coeff_var(nxt_i):
+                        coeff1 += float(tokens[nxt_i].value)
+                        i = nxt_i + _len_coeff_var(nxt_i); continue
+                    const += float(tokens[nxt_i].value); i += 2; continue
+
+            # minus / -
+            if t.value in ("minus", "-") and i + 1 < len(tokens):
+                nxt_i = i + 1
+                if tokens[nxt_i].type == "NUMBER":
+                    if _is_coeff_var_squared(nxt_i):
+                        coeff2 -= float(tokens[nxt_i].value)
+                        i = nxt_i + _len_coeff_var_squared(nxt_i); continue
+                    if _is_coeff_var(nxt_i):
+                        coeff1 -= float(tokens[nxt_i].value)
+                        i = nxt_i + _len_coeff_var(nxt_i); continue
+                    const -= float(tokens[nxt_i].value); i += 2; continue
+
             i += 1
 
         if coeff2 != 0:

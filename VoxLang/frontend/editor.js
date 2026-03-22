@@ -155,6 +155,7 @@ export class VoxLangEditor {
       }
       return true;
     }
+
     if (cmd.includes("delete line") || cmd.includes("remove line")) {
       const model   = this.editor.getModel();
       const pos     = this.editor.getPosition();
@@ -164,8 +165,18 @@ export class VoxLangEditor {
         return true;
       }
       const digitMatch = cmd.match(/\d+/);
+
+      // try digit first, then word number (e.g. "five", "twelve")
+      let targetLine = null;
       if (digitMatch) {
-        const targetLine = parseInt(digitMatch[0]);
+        targetLine = parseInt(digitMatch[0]);
+      } else {
+        const wordPart = cmd.replace(/delete line|remove line/g, "").trim();
+        const parsed   = this._parseWordNumber(wordPart);
+        if (parsed !== null) targetLine = parsed;
+      }
+
+      if (targetLine !== null) {
         if (targetLine < 1 || targetLine > maxLine) {
           this._showError(`Cannot delete line ${targetLine} — file only has ${maxLine} line(s).`);
           return true;
@@ -177,6 +188,8 @@ export class VoxLangEditor {
         this._showSuccess(`Line ${targetLine} deleted.`);
         return true;
       }
+
+      // no number found — delete current line
       const line  = pos.lineNumber;
       const range = line === 1
         ? new this.monaco.Range(1, 1, 2, 1)
@@ -185,27 +198,30 @@ export class VoxLangEditor {
       this._showSuccess(`Line ${line} deleted.`);
       return true;
     }
+
     if (cmd.includes("go to line") || cmd.includes("jump to line") || cmd.includes("navigate to line")) {
       const maxLine    = this.editor.getModel().getLineCount();
       const digitMatch = cmd.match(/\d+/);
+
+      // try digit first, then word number (e.g. "five", "twenty three")
+      let n = null;
       if (digitMatch) {
-        const n = parseInt(digitMatch[0]);
-        if (n < 1) { this._showError("Line numbers start at 1."); return true; }
-        if (n > maxLine) { this._showError(`Line ${n} does not exist — file only has ${maxLine} line(s).`); return true; }
-        this.editor.revealLineInCenter(n);
-        this.editor.setPosition({ lineNumber: n, column: 1 });
-        this._showSuccess(`Moved to line ${n}.`);
-        return true;
+        n = parseInt(digitMatch[0]);
+      } else {
+        n = this._parseWordNumber(
+          cmd.replace(/go to line|jump to line|navigate to line/g, "").trim()
+        );
       }
-      const n = this._parseWordNumber(cmd.replace(/go to line|jump to line|navigate to line/g, "").trim());
+
       if (n === null) { this._showError("Could not understand the line number."); return true; }
-      if (n < 1) { this._showError("Line numbers start at 1."); return true; }
-      if (n > maxLine) { this._showError(`Line ${n} does not exist — file only has ${maxLine} line(s).`); return true; }
+      if (n < 1)      { this._showError("Line numbers start at 1."); return true; }
+      if (n > maxLine){ this._showError(`Line ${n} does not exist — file only has ${maxLine} line(s).`); return true; }
       this.editor.revealLineInCenter(n);
       this.editor.setPosition({ lineNumber: n, column: 1 });
       this._showSuccess(`Moved to line ${n}.`);
       return true;
     }
+
     if (cmd.includes("go to top") || cmd.includes("go to start") || cmd === "top") {
       this.editor.revealLine(1);
       this.editor.setPosition({ lineNumber: 1, column: 1 });
@@ -425,8 +441,8 @@ export class VoxLangEditor {
   }
 
   // ── Sample program — aligned to TN35 spec ─────────────────────────────────
- _sampleProgram() {
-  return `-- Welcome to VoxLang — voice-first programming
+  _sampleProgram() {
+    return `-- Welcome to VoxLang — voice-first programming
 
 store "World" into name
 output "Hello " joined with name
@@ -457,5 +473,5 @@ otherwise
   output "x is small"
 done
 `;
-}
+  }
 }

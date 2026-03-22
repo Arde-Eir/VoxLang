@@ -151,17 +151,17 @@
 
   /* Syntax panel */
   .panic-banner { background:rgba(251,191,36,.1); border:1px solid rgba(251,191,36,.25); border-radius:6px; padding:6px 10px; color:var(--amber); font-size:10px; font-weight:600; margin-bottom:6px; }
-  .panic-row { display:grid; grid-template-columns:20px 1fr 1fr; gap:8px; padding:3px 6px; font-size:10px; border-bottom:1px solid rgba(255,255,255,.025); }
+  .panic-row { display:grid; grid-template-columns:20px 1fr; gap:8px; padding:3px 6px; font-size:10px; border-bottom:1px solid rgba(255,255,255,.025); }
   .panic-icon { color:var(--amber); flex-shrink:0; }
-  .panic-detail { color:var(--red); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .panic-rec { color:var(--teal); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .panic-detail { color:var(--red); overflow:hidden; text-overflow:ellipsis; white-space:normal; word-break:break-word; line-height:1.5; }
+  .panic-rec    { color:var(--teal); white-space:normal; word-break:break-word; grid-column:2; }
   .syn-divider { height:1px; background:var(--border); margin:8px 0; }
-  .syn-hdr { display:grid; grid-template-columns:1fr 44px 1fr; gap:6px; padding:2px 0 4px; border-bottom:1px solid var(--border); font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.8px; color:var(--muted); margin-bottom:2px; }
-  .syn-row { display:grid; grid-template-columns:1fr 44px 1fr; gap:6px; padding:3px 0; border-bottom:1px solid rgba(255,255,255,.025); align-items:center; }
+  .syn-hdr { display:grid; grid-template-columns:1fr 44px 2fr; gap:6px; padding:2px 0 4px; border-bottom:1px solid var(--border); font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.8px; color:var(--muted); margin-bottom:2px; }
+  .syn-row { display:grid; grid-template-columns:1fr 44px 2fr; gap:6px; padding:3px 0; border-bottom:1px solid rgba(255,255,255,.025); align-items:start; }
   .syn-row-err { background:rgba(248,113,113,.05); border-radius:3px; }
   .syn-name   { color:var(--orange); font-weight:600; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .syn-line   { color:var(--muted); font-size:10px; }
-  .syn-detail { color:var(--muted); font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .syn-detail { color:var(--muted); font-size:10px; overflow:hidden; text-overflow:ellipsis; white-space:normal; word-break:break-word; line-height:1.5; }
 
   /* ── Symbol table ──────────────────────────────────────────────────────── */
   .sym-table { width:100%; border-collapse:collapse; font-size:10px; }
