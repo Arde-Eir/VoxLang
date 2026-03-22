@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VoxLang — Language Reference</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&family=Syne:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #0B0D14;
+    --surface:  #10131E;
+    --surface2: #161A2A;
+    --surface3: #1C2135;
+    --border:   #1E2340;
+    --accent:   #5B73FF;
+    --accent2:  #A78BFA;
+    --green:    #4ADE80;
+    --red:      #F87171;
+    --amber:    #FBBF24;
+    --teal:     #2DD4BF;
+    --orange:   #FF9D6C;
+    --pink:     #F472B6;
+    --text:     #E2E0DD;
+    --muted:    #6B7280;
+    --muted2:   #2A304A;
+    --font-ui:  'Syne', sans-serif;
+    --font-mono:'DM Mono', monospace;
+  }
+
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-ui);
+    min-height: 100vh;
+  }
+
+  /* ── Topbar ── */
+  #topbar {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 0 32px;
+    height: 52px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(8px);
+  }
+  .logo { font-size: 20px; font-weight: 800; letter-spacing: -0.5px; color: #fff; text-decoration: none; }
+  .logo span { color: var(--accent); }
+  .logo-tag {
+    font-size: 10px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;
+    color: var(--muted); background: var(--muted2); padding: 2px 8px; border-radius: 20px;
+  }
+  .spacer { flex: 1; }
+  .nav-links { display: flex; gap: 6px; }
+  .nav-btn {
+    font-family: var(--font-ui); font-size: 12px; font-weight: 500;
+    padding: 5px 14px; border-radius: 6px; border: 1px solid var(--border);
+    background: transparent; color: var(--muted); cursor: pointer;
+    text-decoration: none; transition: all 0.15s; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .nav-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .nav-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .nav-btn.primary:hover { background: #4060EE; }
+
+  /* ── Quick-jump nav ── */
+  #quicknav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 14px 32px;
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+  }
+  .qn-btn {
+    font-family: var(--font-mono); font-size: 11px; padding: 3px 10px;
+    border-radius: 20px; border: 1px solid var(--border);
+    background: transparent; color: var(--muted); cursor: pointer;
+    text-decoration: none; transition: all 0.12s;
+  }
+  .qn-btn:hover { border-color: var(--accent2); color: var(--accent2); }
+
+  /* ── Page body ── */
+  #page { max-width: 1180px; margin: 0 auto; padding: 36px 32px 80px; }
+
+  /* ── Page title ── */
+  .page-title {
+    display: flex; align-items: flex-end; gap: 16px;
+    margin-bottom: 36px; padding-bottom: 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  .page-title h1 { font-size: 36px; font-weight: 800; letter-spacing: -0.5px; color: #fff; line-height: 1; }
+  .page-title h1 span { color: var(--accent); }
+  .page-title-sub { font-size: 13px; color: var(--muted); padding-bottom: 3px; }
+
+  /* ── Section headings ── */
+  .sec-anchor { display: block; position: relative; top: -80px; visibility: hidden; }
+  h2.sec {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 11px; font-weight: 700; letter-spacing: 1.4px; text-transform: uppercase;
+    color: var(--muted);
+    margin: 36px 0 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  h2.sec .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+  /* ── Grid ── */
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .span-2 { grid-column: span 2; }
+  .span-3 { grid-column: span 3; }
+
+  /* ── Cards ── */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .card-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 15px; border-bottom: 1px solid var(--border);
+  }
+  .card-head h3 {
+    font-size: 11px; font-weight: 700; letter-spacing: 1px;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .card-body { padding: 13px 15px; }
+
+  /* ── Code ── */
+  pre {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 7px; padding: 10px 13px;
+    font-family: var(--font-mono); font-size: 12.5px; line-height: 1.8;
+    white-space: pre; overflow-x: auto; margin: 8px 0 4px;
+  }
+  code { font-family: var(--font-mono); font-size: 12px; }
+
+  /* ── Token colours ── */
+  .kd  { color: var(--orange);  font-weight: 500; } /* declare */
+  .ko  { color: var(--green);   font-weight: 500; } /* output  */
+  .kc  { color: #F28B82;        font-weight: 500; } /* control */
+  .kf  { color: #81C995;        font-weight: 500; } /* funcdef */
+  .kl  { color: var(--accent2); font-weight: 500; } /* call    */
+  .km  { color: var(--amber);   font-weight: 500; } /* math    */
+  .cp  { color: #93C5FD;                          } /* compare */
+  .op  { color: var(--orange);                    } /* operator*/
+  .s   { color: #A8FF78;                          } /* string  */
+  .n   { color: var(--orange);                    } /* number  */
+  .cm  { color: #4A5568; font-style: italic;      } /* comment */
+  .id  { color: var(--text);                      } /* ident   */
+
+  /* ── Alias pills ── */
+  .pills { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0 2px; }
+  .pill {
+    font-family: var(--font-mono); font-size: 11px; padding: 2px 8px;
+    border-radius: 20px; border: 1px solid; white-space: nowrap;
+  }
+  .p-d { color: var(--orange); border-color: rgba(255,157,108,.3); background: rgba(255,157,108,.07); }
+  .p-o { color: var(--green);  border-color: rgba(74,222,128,.3);  background: rgba(74,222,128,.07); }
+  .p-c { color: #F28B82;       border-color: rgba(242,139,130,.3); background: rgba(242,139,130,.07); }
+  .p-f { color: #81C995;       border-color: rgba(129,201,149,.3); background: rgba(129,201,149,.07); }
+  .p-l { color: var(--accent2);border-color: rgba(167,139,250,.3); background: rgba(167,139,250,.07); }
+  .p-m { color: var(--amber);  border-color: rgba(251,191,36,.3);  background: rgba(251,191,36,.07); }
+  .p-r { color: var(--teal);   border-color: rgba(45,212,191,.3);  background: rgba(45,212,191,.07); }
+  .p-w { color: var(--pink);   border-color: rgba(244,114,182,.3); background: rgba(244,114,182,.07); }
+  .p-x { color: var(--muted);  border-color: rgba(107,114,128,.3); background: rgba(107,114,128,.07); }
+
+  /* ── Table ── */
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th { font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); padding: 4px 8px 8px; text-align: left; border-bottom: 1px solid var(--border); }
+  td { padding: 5px 8px; border-bottom: 1px solid rgba(255,255,255,.03); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  td:first-child { font-family: var(--font-mono); }
+
+  /* ── Note box ── */
+  .note {
+    background: rgba(91,115,255,.08); border: 1px solid rgba(91,115,255,.2);
+    border-radius: 7px; padding: 8px 12px; font-size: 12px; color: var(--muted); margin: 8px 0;
+  }
+  .note strong, .note code { color: var(--accent2); }
+
+  /* ── Type badges ── */
+  .tb { display: inline-block; font-family: var(--font-mono); font-size: 10px; padding: 1px 6px; border-radius: 4px; margin-right: 2px; }
+  .tb-n { background: rgba(255,157,108,.15); color: var(--orange); }
+  .tb-t { background: rgba(168,255,120,.12); color: #A8FF78; }
+  .tb-b { background: rgba(167,139,250,.15); color: var(--accent2); }
+  .tb-p { background: rgba(45,212,191,.12);  color: var(--teal); }
+  .tb-c { background: rgba(74,222,128,.12);  color: var(--green); }
+
+  /* ── Pipeline boxes ── */
+  .pipeline { display: flex; gap: 6px; flex-wrap: wrap; }
+  .phase {
+    flex: 1; min-width: 80px; border-radius: 8px; padding: 10px 6px;
+    text-align: center; border: 1px solid;
+  }
+  .phase .pn  { font-size: 9px; font-weight: 700; letter-spacing: .5px; margin-bottom: 3px; }
+  .phase .pname { font-size: 12px; font-weight: 600; color: var(--text); }
+  .phase .psub  { font-size: 10px; color: var(--muted); margin-top: 3px; }
+
+  /* ── Footer ── */
+  footer {
+    text-align: center; padding: 40px 0 60px;
+    font-size: 11px; color: var(--muted);
+    border-top: 1px solid var(--border); margin-top: 60px;
+  }
+
+  /* ── Print ── */
+  @media print {
+    #topbar, #quicknav { display: none; }
+    body { background: white; color: black; }
+    .card { border: 1px solid #ccc; break-inside: avoid; }
+    pre  { background: #f5f5f5; border-color: #ddd; color: black; }
+    :root { --bg: white; --surface: #f9f9f9; --surface2: #f0f0f0; --border: #ddd; --text: #111; --muted: #555; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ── Topbar ─────────────────────────────────────────────────────────────── -->
+<div id="topbar">
+  <a href="/" class="logo">Vox<span>Lang</span></a>
+  <span class="logo-tag">Reference</span>
+  <div class="spacer"></div>
+  <div class="nav-links">
+    <button class="nav-btn" onclick="window.print()">⎙ Print / PDF</button>
+    <a href="index.html" class="nav-btn primary">← Back to IDE</a>
+  </div>
+</div>
+
+<!-- ── Quick-jump nav ─────────────────────────────────────────────────────── -->
+<div id="quicknav">
+  <a class="qn-btn" href="#variables">Variables</a>
+  <a class="qn-btn" href="#update">Update</a>
+  <a class="qn-btn" href="#raise-lower">Raise / Lower</a>
+  <a class="qn-btn" href="#output-input">Output / Input</a>
+  <a class="qn-btn" href="#conditions">Conditions</a>
+  <a class="qn-btn" href="#loops">Loops</a>
+  <a class="qn-btn" href="#functions">Functions</a>
+  <a class="qn-btn" href="#math">Math</a>
+  <a class="qn-btn" href="#builtins">Built-ins</a>
+  <a class="qn-btn" href="#comments">Comments</a>
+  <a class="qn-btn" href="#example">Example</a>
+  <a class="qn-btn" href="#pipeline">Pipeline</a>
+</div>
+
+<!-- ── Page body ─────────────────────────────────────────────────────────── -->
+<div id="page">
+
+  <div class="page-title">
+    <h1>Vox<span>Lang</span></h1>
+    <div class="page-title-sub">Complete Language Reference &amp; Cheat Sheet</div>
+  </div>
+
+  <!-- ════════════════════════════ VARIABLES ════════════════════════════════ -->
+  <span class="sec-anchor" id="variables"></span>
+  <h2 class="sec"><span class="dot" style="background:var(--orange)"></span>Variables &amp; Data Types</h2>
+  <div class="grid">
+
+    <div class="card">
+      <div class="card-head"><div class="dot" style="background:var(--orange)"></div><h3>Declare</h3></div>
+      <div class="card-body">
+<pre><span class="kd">store</span> <span class="n">42</span> <span class="kd">into</span> <span class="id">age</span>
+<span class="kd">store</span> <span class="s">"Alice"</span> <span class="kd">into</span> <span class="id">name</span>
+<span class="kd">store</span> <span class="kd">collection</span> <span class="n">1</span> and <span class="n">2</span> and <span class="n">3</span> <span class="kd">into</span> <span class="id">nums</span>
+<span class="kd">store</span> <span class="n">1</span> <span class="op">divided by</span> <span class="n">3</span> <span class="kd">into</span> <span class="id">x</span> <span class="kd">precisely</span></pre>
+        <div class="pills">
+          <span class="pill p-d">store</span><span class="pill p-d">remember</span>
+          <span class="pill p-d">declare</span><span class="pill p-d">assign</span>
+          <span class="pill p-d">hold</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card span-2">
+      <div class="card-head"><div class="dot" style="background:var(--accent2)"></div><h3>Data Types</h3></div>
+      <div class="card-body">
+        <table>
+          <tr><th>Type</th><th>Width</th><th>Example</th><th>Notes</th></tr>
+          <tr><td><span class="tb tb-n">num</span></td><td style="color:var(--muted)">int-32 / float-64</td><td><code class="n">42</code>&nbsp;&nbsp;<code class="n">3.14</code></td><td style="color:var(--muted);font-size:11px">integer or decimal</td></tr>
+          <tr><td><span class="tb tb-t">text</span></td><td style="color:var(--muted)">string-N</td><td><code class="s">"hello"</code></td><td style="color:var(--muted);font-size:11px">always double-quoted</td></tr>
+          <tr><td><span class="tb tb-b">bool</span></td><td style="color:var(--muted)">bool-1</td><td><code class="cp">true</code> / <code class="cp">false</code></td><td style="color:var(--muted);font-size:11px">boolean</td></tr>
+          <tr><td><span class="tb tb-p">precise</span></td><td style="color:var(--muted)">precise-128</td><td><code>... <span class="kd">precisely</span></code></td><td style="color:var(--muted);font-size:11px">128-bit decimal, exact</td></tr>
+          <tr><td><span class="tb tb-c">collection</span></td><td style="color:var(--muted)">collection-N</td><td><code><span class="kd">collection</span> <span class="n">1</span> and <span class="n">2</span></code></td><td style="color:var(--muted);font-size:11px">ordered list of values</td></tr>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ════════════════════════════ UPDATE ══════════════════════════════════ -->
+  <span class="sec-anchor" id="update"></span>
+  <h2 class="sec"><span class="dot" style="background:var(--orange)"></span>Update a Variable</h2>
+  <div class="grid-2">
+
+    <div class="card">
+      <div class="card-head"><div class="dot" style="background:var(--orange)"></div><h3>Syntax</h3></div>
+      <div class="card-body">
+<pre><span class="kd">update</span> <span class="id">age</span> <span class="kd">to</span> <span class="n">25</span>
+<span class="kd">change</span> <span class="id">name</span> <span class="kd">to</span> <span class="s">"Bob"</span>
+<span class="kd">set</span> <span class="id">score</span> <span class="kd">to</span> <span class="n">0</span>
+<span class="kd">overwrite</span> <span class="id">flag</span> <span class="kd">to</span> <span class="cp">true</span></pre>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><div class="dot" style="background:var(--orange)"></div><h3>All Aliases</h3></div>
+      <div class="card-body">
+        <div class="pills">
+          <span class="pill p-d">update</span><span class="pill p-d">change</span>
+          <span class="pill p-d">set</span><span class="pill p-d">modify</span>
+          <span class="pill p-d">replace</span><span class="pill p-d">reassign</span>
+          <span class="pill p-d">redefine</span><span class="pill p-d">overwrite</span>
+        </div>
+        <div class="note">All forms take the pattern: <strong>&lt;alias&gt; &lt;name&gt; to &lt;value&gt;</strong></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ════════════════════════════ RAISE / LOWER ═══════════════════════════ -->
+  <span class="sec-anchor" id="raise-lower"></span>
+  <h2 class="sec"><span class="dot" style="background:var(--teal)"></span>Raise &amp; Lower</h2>
+  <div class="grid-2">
+
+    <div class="card">
+      <div class="card-head"><div class="dot" style="background:var(--teal)"></div><h3>Raise (add to a variable)</h3></div>
+      <div class="card-body">
+<pre><span class="kd">raise</span> <span class="id">score</span> <span class="op">by</span> <span class="n">10</span>
+<span class="kd">increase</span> <span class="id">count</span> <span class="op">by</span> <span class="n">1</span>
+<span class="kd">increment</span> <span class="id">index</span> <span class="op">by</span> <span class="n">1</span>
+<span class="op">add</span> <span class="n">5</span> <span class="op">to</span> <span class="id">total</span>
+<span class="kd">bump up</span> <span class="id">level</span> <span class="op">by</span> <span class="n">2</span></pre>
+        <div class="pills">
+          <span class="pill p-r">raise</span><span class="pill p-r">increase</span>
+          <span class="pill p-r">increment</span><span class="pill p-r">boost</span>
+          <span class="pill p-r">grow</span><span class="pill p-r">expand</span>
+          <span class="pill p-r">add N to</span><span class="pill p-r">bump up</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><div class="dot" style="background:var(--pink)"></div><h3>Lower (subtract from a variable)</h3></div>
+      <div class="card-body">
+<pre><span class="kd">lower</span> <span class="id">lives</span> <span class="op">by</span> <span class="n">1</span>
+<span class="kd">decrease</span> <span class="id">health</span> <span class="op">by</span> <span class="n">10</span>
+<span class="kd">decrement</span> <span class="id">count</span> <span class="op">by</span> <span class="n">1</span>
+<span class="op">subtract</span> <span class="n">3</span> <span class="op">from</span> <span class="id">total</span>
+<span class="kd">drop down</span> <span class="id">level</span> <span class="op">by</span> <span class="n">1</span></pre>
+        <div class="pills">
+          <span class="pill p-w">lower</span><span class="pill p-w">decrease</span>
+          <span class="pill p-w">decrement</span><span class="pill p-w">reduce</span>
+          <span class="pill p-w">shrink</span><span class="pill p-w">trim</span>
+          <span class="pill p-w">cut</span><span class="pill p-w">subtract N from</span>
+          <span class="pill p-w">drop down</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ════════════════════════════ OUTPUT / INPUT ══════════════════════════ -->
+  <span class="sec-anchor" id="output-input"></span>
+  <h2 class="sec"><span class="dot" style="background:var(--green)"></span>Output &amp; Input</h2>
+  <div class="grid">
+
+    <div class="card">
+      <div class="card-head"><div class="dot" style="background:var(--green)"></div><h3>Output</h3></div>
+      <div class="card-body">
+<pre><span class="ko">output</span> <span class="id">name</span>
+<span class="ko">show</span> <span class="id">age</span>
+<span class="ko">say</span> <span class="s">"Hello!"</span>
+<span class="ko">tell me</span> <span class="id">score</span>
+<span class="ko">what is</span> <span class="id">result</span>
+<span class="ko">print</span> <span class="s">"done"</span></pre>
+        <div class="pills">
+          <span class="pill p-o">output</span><span class="pill p-o">show</span>
+          <span class="pill p-o">display</span><span class="pill p-o">print</span>
+          <span class="pill p-o">reveal</span><span class="pill p-o">say</span>
+          <span class="pill p-o">write</span><span class="pill p-o">log</span>
+          <span class="pill p-o">emit</span><span class="pill p-o">speak</span>
+          <span class="pill p-o">announce</span><span class="pill p-o">echo</span>
+          <span class="pill p-o">tell me</span><span class="pill p-o">what is</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><div class="dot" style="background:var(--accent)"></div><h3>Input</h3></div>
+      <div class="card-body">
+<pre><span class="kc">ask</span> what is your name <span class="kd">then save into</span> <span class="id">name</span>
+<span class="kc">hear</span> enter your age <span class="kd">then save into</span> <span class="id">age</span>
+<span class="kc">question</span> favourite colour <span class="kd">then save into</span> <span class="id">col</span>
+<span class="kc">prompt</span> enter score <span class="kd">then save into</span> <span class="id">score</span>
+<span class="kc">listen</span> say something <span class="kd">then save into</span> <span class="id">msg</span></pre>
+        <div class="pills">
+          <span class="pill p-c">ask</span><span class="pill p-c">hear</span>
+          <span class="pill p-c">question</span><span class="pill p-c">prompt</span>
+          <span class="pill p-c">listen</span><span class="pill p-c">receive</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><div class="dot" style="background:var(--accent2)"></div><h3>String Joining</h3></div>
+      <div class="card-body">
+<pre><span class="kc">output</span> <span class="s">"Hello, "</span> <span class="op">joined with</span> <span class="id">name</span>
+<span class="kc">output</span> <span class="s">"Score: "</span> <span class="op">joined with</span> <span class="id">score</span>
+<span class="cm">-- + also concatenates when either side is text</span>
+<span class="kd">store</span> <span class="s">"Hi"</span> + <span class="s">" there"</span> <span class="kd">into</span> <span class="id">greeting</span></pre>
+        <div class="note"><strong>joined with</strong> works with any type — numbers are auto-converted to text.</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ════════════════════════════ CONDITIONS ══════════════════════════════ -->
+  <span class="sec-anchor" id="conditions"></span>
+  <h2 class="sec"><span class="dot" style="background:#F28B82"></span>Conditions</h2>
+  <div class="grid">
+
+    <div class="card">
+      <div class="card-head"><div class="dot" style="background:#F28B82"></div><h3>Basic Condition</h3></div>
+      <div class="card-body">
+<pre><span class="kc">when</span> <span class="id">age</span> <span class="cp">is bigger than</span> <span class="n">18</span> <span class="kc">then</span>
+  <span class="ko">output</span> <span class="s">"adult"</span>
+<span class="kc">otherwise</span>
+  <span class="ko">output</span> <span class="s">"minor"</span>
+<span class="kc">done</span></pre>
+        <div class="pills">
+          <span class="pill p-c">when</span><span class="pill p-c">if</span>
+          <span class="pill p-c">suppose</span><span class="pill p-c">assuming</span>
+          <span class="pill p-c">provided</span><span class="pill p-c">given</span>
+          <span class="pill p-c">check if</span><span class="pill p-c">unless</span>
+        </div>
+        <div class="pills">
+          <span class="pill p-c">otherwise</span><span class="pill p-c">else</span>
+          <span class="pill p-c">elif</span><span class="pill p-c">elseif</span>
+          <span class="pill p-c">else if</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><div class="dot" style="background:#F28B82"></div><h3>Elif Chain</h3></div>
+      <div class="card-body">
+<pre><span class="kc">when</span> <span class="id">score</span> <span class="cp">is bigger than</span> <span class="n">90</span> <span class="kc">then</span>
+  <span class="ko">output</span> <span class="s">"A"</span>
+<span class="kc">elif</span> <span class="id">score</span> <span class="cp">is bigger than</span> <span class="n">80</span> <span class="kc">then</span>
+  <span class="ko">output</span> <span class="s">"B"</span>
+<span class="kc">elif</span> <span class="id">score</span> <span class="cp">is bigger than</span> <span class="n">70</span> <span class="kc">then</span>
+  <span class="ko">output</span> <span class="s">"C"</span>
+<span class="kc">otherwise</span>
+  <span class="ko">output</span> <span class="s">"F"</span>
+<span class="kc">done</span></pre>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><div class="dot" style="background:#93C5FD"></div><h3>Comparison Operators</h3></div>
+      <div class="card-body">
+        <table>
+          <tr><th>Op</th><th>Phrases</th></tr>
+          <tr><td><code class="cp">&gt;</code></td><td style="color:var(--muted);font-size:11px">is bigger than · is greater than · is above · is more than · is over</td></tr>
+          <tr><td><code class="cp">&lt;</code></td><td style="color:var(--muted);font-size:11px">is smaller than · is less than · is below · is under</td></tr>
+          <tr><td><code class="cp">==</code></td><td style="color:var(--muted);font-size:11px">is equal to · is the same as · is exactly · equals · is</td></tr>
+          <tr><td><code class="cp">!=</code></td><td style="color:var(--muted);font-size:11px">is not equal to · is not · is different from</td></tr>
+          <tr><td><code class="cp">&gt;=</code></td><td style="color:var(--muted);font-size:11px">is at least · is no less than</td></tr>
+          <tr><td><code class="cp">&lt;=</code></td><td style="color:var(--muted);font-size:11px">is at most · is no more than</td></tr>
+          <tr><td><code class="cp">empty</code></td><td style="color:var(--muted);font-size:11px">is empty · is nothing · is null</td></tr>
+          <tr><td><code class="cp">bool</code></td><td style="color:var(--muted);font-size:11px">is true · is false</td></tr>
+        </table>
+        <div class="note">Compound: <code>x <span class="cp">is bigger than</span> 0 <span class="cp">and</span> y <span class="cp">is bigger than</span> 0</code></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ════════════════════════════ LOOPS ═══════════════════════════════════ -->
+  <span class="sec-anchor" id="loops"></span>
+  <h2 class="sec"><span class="dot" style="background:var(--amber)"></span>Loops</h2>
+  <div class="grid">
+
+    <div class="card">
+      <div class="card-head"><div class="dot" style="background:var(--amber)"></div><h3>Count Loop (N times)</h3></div>
+      <div class="card-body">
+<pre><span class="kc">do this</span> <span class="n">5</span> <span class="kc">times</span>
+  <span class="ko">output</span> <span class="id">index</span>   <span class="cm">-- 1, 2, 3, 4, 5</span>
+<span class="kc">done</span></pre>
+        <div class="pills">
+          <span class="pill p-m">do this</span><span class="pill p-m">repeat</span>
+          <span class="pill p-m">cycle</span><span class="pill p-m">loop</span>
+          <span class="pill p-m">iterate</span>
+        </div>
+        <div class="note"><strong>index</strong> is automatically available inside the loop (starts at 1).</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><div class="dot" style="background:var(--amber)"></div><h3>For-Each Loop</h3></div>
+      <div class="card-body">
+<pre><span class="kc">go through every</span> <span class="id">item</span> <span class="kc">in</span> <span class="id">numbers</span>
+  <span class="ko">output</span> <span class="id">item</span>
+<span class="kc">done</span></pre>
+        <div class="pills">
+          <span class="pill p-m">go through</span><span class="pill p-m">walk through</span>
+          <span class="pill p-m">visit</span><span class="pill p-m">step through</span>
+          <span class="pill p-m">scan</span><span class="pill p-m">traverse</span>
+        </div>
+        <div class="note">Use <strong>every</strong> or <strong>each</strong> before the loop variable name.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><div class="dot" style="background:var(--amber)"></div><h3>While Loop</h3></div>
+      <div class="card-body">
+<pre><span class="kc">keep going while</span> <span class="id">x</span> <span class="cp">is bigger than</span> <span class="n">0</span>
+  <span class="kd">lower</span> <span class="id">x</span> <span class="op">by</span> <span class="n">1</span>
+<span class="kc">done</span></pre>
+        <div class="pills">
+          <span class="pill p-m">keep going while</span>
+          <span class="pill p-m">stay while</span>
+          <span class="pill p-m">continue while</span>
+          <span class="pill p-m">repeat while</span>
+          <span class="pill p-m">as long as</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ════════════════════════════ FUNCTIONS ═══════════════════════════════ -->
+  <span class="sec-anchor" id="functions"></span>
+  <h2 class="sec"><span class="dot" style="background:#81C995"></span>Functions</h2>
+  <div class="grid">
+
+    <div class="card span-2">
+      <div class="card-head"><div class="dot" style="background:#81C995"></div><h3>Define &amp; Call</h3></div>
+      <div class="card-body" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div>
+<pre><span class="cm">-- define</span>
+<span class="kf">build</span> <span class="id">greet</span> <span class="kf">using</span> <span class="id">name</span>
+  <span class="ko">output</span> <span class="s">"Hello, "</span> <span class="op">joined with</span> <span class="id">name</span>
+<span class="kc">done</span>
+
+<span class="cm">-- multiple params</span>
+<span class="kf">create</span> <span class="id">add</span> <span class="kf">using</span> <span class="id">a</span> and <span class="id">b</span>
+  <span class="kc">return</span> <span class="id">a</span> + <span class="id">b</span>
+<span class="kc">done</span></pre>
+          <div class="pills">
+            <span class="pill p-f">build</span><span class="pill p-f">create</span>
+            <span class="pill p-f">make</span><span class="pill p-f">craft</span>
+            <span class="pill p-f">define</span><span class="pill p-f">function</span>
+            <span class="pill p-f">func</span><span class="pill p-f">method</span>
+            <span class="pill p-f">procedure</span><span class="pill p-f">routine</span>
+            <span class="pill p-f">action</span><span class="pill p-f">task</span>
+            <span class="pill p-f">recipe</span>
+          </div>
+        </div>
+        <div>
+<pre><span class="cm">-- call (no return needed)</span>
+<span class="kl">use</span> <span class="id">greet</span> <span class="kl">with</span> <span class="s">"Alice"</span>
+<span class="kl">invoke</span> <span class="id">greet</span> <span class="kl">with</span> <span class="s">"Bob"</span>
+
+<span class="cm">-- capture return value</span>
+<span class="kd">store</span> <span class="kl">result of</span> <span class="id">add</span> <span class="kl">with</span> <span class="n">3</span> and <span class="n">4</span> <span class="kd">into</span> <span class="id">sum</span>
+<span class="kl">get</span> <span class="kl">result of</span> <span class="id">add</span> <span class="kl">with</span> <span class="n">3</span> and <span class="n">4</span> <span class="kd">into</span> <span class="id">sum</span>
+<span class="kl">capture</span> <span class="kl">result of</span> <span class="id">add</span> <span class="kl">with</span> <span class="n">3</span> and <span class="n">4</span> <span class="kd">into</span> <span class="id">sum</span></pre>
+          <div class="pills">
+            <span class="pill p-l">use</span><span class="pill p-l">call</span>
+            <span class="pill p-l">trigger</span><span class="pill p-l">run</span>
+            <span class="pill p-l">activate</span><span class="pill p-l">invoke</span>
+            <span class="pill p-l">execute</span><span class="pill p-l">perform</span>
+            <span class="pill p-l">apply</span><span class="pill p-l">launch</span>
+            <span class="pill p-l">fire</span><span class="pill p-l">dispatch</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><div class="dot" style="background:#81C995"></div><h3>Return &amp; Params</h3></div>
+      <div class="card-body">
+<pre><span class="kf">build</span> <span class="id">double</span> <span class="kf">using</span> <span class="id">n</span>
+  <span class="kc">return</span> <span class="id">n</span> * <span class="n">2</span>
+<span class="kc">done</span></pre>
+        <div class="pills">
+          <span class="pill p-f">return</span>
+          <span class="pill p-f">give back</span>
+          <span class="pill p-f">yield</span>
+        </div>
+        <div class="note">Param introducers: <strong>using · with · taking · accepting · receiving · needing · having · given</strong></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ════════════════════════════ MATH ════════════════════════════════════ -->
+  <span class="sec-anchor" id="math"></span>
+  <h2 class="sec"><span class="dot" style="background:var(--amber)"></span>Math &amp; Equations</h2>
+  <div class="grid">
+
+    <div class="card">
+      <div class="card-head"><div class="dot" style="background:var(--amber)"></div><h3>Arithmetic Operators</h3></div>
+      <div class="card-body">
+        <table>
+          <tr><th>Operation</th><th>Symbol form</th><th>Word form</th></tr>
+          <tr><td>Add</td><td><code>a + b</code></td><td><code class="op">a plus b</code></td></tr>
+          <tr><td>Subtract</td><td><code>a - b</code></td><td><code class="op">a minus b</code></td></tr>
+          <tr><td>Multiply</td><td><code>a * b</code></td><td><code class="op">a times b</code></td></tr>
+          <tr><td>Divide</td><td><code>a / b</code></td><td><code class="op">a divided by b</code></td></tr>
+          <tr><td>Modulo</td><td><code>a % b</code></td><td><code class="op">a mod b</code></td></tr>
+          <tr><td>Power</td><td><code>a ** b</code></td><td><code class="op">a to the power of b</code></td></tr>
+          <tr><td>Square</td><td>—</td><td><code class="op">x squared</code></td></tr>
+          <tr><td>Percent</td><td>—</td><td><code class="op">15 percent of 200</code></td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><div class="dot" style="background:var(--amber)"></div><h3>Built-in Formulas</h3></div>
+      <div class="card-body">
+<pre><span class="cm">-- square root</span>
+<span class="kd">store</span> <span class="op">square root of</span> <span class="n">144</span> <span class="kd">into</span> <span class="id">r</span>
+
+<span class="cm">-- circle area (π r²)</span>
+<span class="kd">store</span> <span class="op">circle area with radius</span> <span class="n">7</span> <span class="kd">into</span> <span class="id">a</span>
+
+<span class="cm">-- hypotenuse (√ a²+b²)</span>
+<span class="kd">store</span> <span class="op">hypotenuse with a</span> <span class="n">3</span> <span class="op">and b</span> <span class="n">4</span> <span class="kd">into</span> <span class="id">h</span>
+
+<span class="cm">-- sphere volume</span>
+<span class="kd">store</span> <span class="op">volume of sphere with radius</span> <span class="n">5</span> <span class="kd">into</span> <span class="id">v</span></pre>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><div class="dot" style="background:var(--amber)"></div><h3>Equation Solver</h3></div>
+      <div class="card-body">
+<pre><span class="cm">-- linear:  2x + 3 = 15  →  x = 6</span>
+<span class="km">solve</span> <span class="id">x</span> <span class="km">where</span> <span class="n">2</span> <span class="op">times</span> <span class="id">x</span> <span class="op">plus</span> <span class="n">3</span> <span class="km">equals</span> <span class="n">15</span>
+
+<span class="cm">-- quadratic: stores x and x2</span>
+<span class="km">solve</span> <span class="id">x</span> <span class="km">where</span> <span class="id">x</span> <span class="op">squared</span> <span class="op">plus</span> <span class="n">5</span> <span class="op">times</span> <span class="id">x</span> <span class="op">plus</span> <span class="n">6</span> <span class="km">equals</span> <span class="n">0</span>
+
+<span class="cm">-- math block groups equations</span>
+<span class="km">math block</span>
+  <span class="km">solve</span> <span class="id">x</span> <span class="km">where</span> <span class="id">x</span> + <span class="n">10</span> <span class="km">equals</span> <span class="n">25</span>
+<span class="kc">done</span></pre>
+        <div class="note">Quadratic solver stores both roots as <strong>x</strong> and <strong>x2</strong>.</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ════════════════════════════ BUILT-INS ═══════════════════════════════ -->
+  <span class="sec-anchor" id="builtins"></span>
+  <h2 class="sec"><span class="dot" style="background:var(--teal)"></span>Built-in Functions</h2>
+  <div class="grid-2">
+
+    <div class="card">
+      <div class="card-head"><div class="dot" style="background:var(--teal)"></div><h3>Collections &amp; Strings</h3></div>
+      <div class="card-body">
+        <table>
+          <tr><th>Call</th><th>Returns</th></tr>
+          <tr><td><code><span class="kl">use</span> length <span class="kl">with</span> list</code></td><td style="color:var(--muted)">number of items</td></tr>
+          <tr><td><code><span class="kl">use</span> reverse <span class="kl">with</span> list</code></td><td style="color:var(--muted)">reversed collection</td></tr>
+          <tr><td><code><span class="kl">use</span> sum <span class="kl">with</span> list</code></td><td style="color:var(--muted)">total of all items</td></tr>
+          <tr><td><code><span class="kl">use</span> max <span class="kl">with</span> list</code></td><td style="color:var(--muted)">largest value</td></tr>
+          <tr><td><code><span class="kl">use</span> min <span class="kl">with</span> list</code></td><td style="color:var(--muted)">smallest value</td></tr>
+          <tr><td><code><span class="kl">use</span> contains <span class="kl">with</span> list and val</code></td><td style="color:var(--muted)">true / false</td></tr>
+          <tr><td><code><span class="kl">use</span> join <span class="kl">with</span> list and ", "</code></td><td style="color:var(--muted)">text string</td></tr>
+          <tr><td><code><span class="kl">use</span> split <span class="kl">with</span> text and " "</code></td><td style="color:var(--muted)">collection</td></tr>
+          <tr><td><code><span class="kl">use</span> upper <span class="kl">with</span> text</code></td><td style="color:var(--muted)">UPPERCASED text</td></tr>
+          <tr><td><code><span class="kl">use</span> lower <span class="kl">with</span> text</code></td><td style="color:var(--muted)">lowercased text</td></tr>
+          <tr><td><code><span class="kl">use</span> range <span class="kl">with</span> 1 and 10</code></td><td style="color:var(--muted)">collection 1 → 10</td></tr>
+          <tr><td><code><span class="kl">use</span> text <span class="kl">with</span> 42</code></td><td style="color:var(--muted)">convert to string</td></tr>
+          <tr><td><code><span class="kl">use</span> number <span class="kl">with</span> "3.14"</code></td><td style="color:var(--muted)">convert to number</td></tr>
+          <tr><td><code><span class="kl">use</span> round <span class="kl">with</span> 3.14159 and 2</code></td><td style="color:var(--muted)">3.14</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><div class="dot" style="background:var(--teal)"></div><h3>Math Functions</h3></div>
+      <div class="card-body">
+        <table>
+          <tr><th>Call</th><th>Returns</th></tr>
+          <tr><td><code><span class="kl">use</span> abs <span class="kl">with</span> -5</code></td><td style="color:var(--muted)">5 (absolute value)</td></tr>
+          <tr><td><code><span class="kl">use</span> sqrt <span class="kl">with</span> 16</code></td><td style="color:var(--muted)">4.0</td></tr>
+          <tr><td><code><span class="kl">use</span> power <span class="kl">with</span> 2 and 8</code></td><td style="color:var(--muted)">256</td></tr>
+          <tr><td><code><span class="kl">use</span> floor <span class="kl">with</span> 3.9</code></td><td style="color:var(--muted)">3</td></tr>
+          <tr><td><code><span class="kl">use</span> ceiling <span class="kl">with</span> 3.1</code></td><td style="color:var(--muted)">4</td></tr>
+          <tr><td><code><span class="kl">use</span> factorial <span class="kl">with</span> 5</code></td><td style="color:var(--muted)">120</td></tr>
+          <tr><td><code><span class="kl">use</span> sin <span class="kl">with</span> 90</code></td><td style="color:var(--muted)">1.0 (degrees)</td></tr>
+          <tr><td><code><span class="kl">use</span> cos <span class="kl">with</span> 0</code></td><td style="color:var(--muted)">1.0</td></tr>
+          <tr><td><code><span class="kl">use</span> tan <span class="kl">with</span> 45</code></td><td style="color:var(--muted)">~1.0</td></tr>
+          <tr><td><code><span class="kl">use</span> log <span class="kl">with</span> 100 and 10</code></td><td style="color:var(--muted)">2.0</td></tr>
+          <tr><td><code><span class="kl">use</span> log10 <span class="kl">with</span> 1000</code></td><td style="color:var(--muted)">3.0</td></tr>
+          <tr><td><code><span class="kl">use</span> random <span class="kl">with</span> 1 and 100</code></td><td style="color:var(--muted)">random float</td></tr>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ════════════════════════════ COMMENTS & CLOSERS ══════════════════════ -->
+  <span class="sec-anchor" id="comments"></span>
+  <h2 class="sec"><span class="dot" style="background:var(--muted)"></span>Comments &amp; Block Closers</h2>
+  <div class="grid-2">
+
+    <div class="card">
+      <div class="card-head"><div class="dot" style="background:var(--muted)"></div><h3>Comments</h3></div>
+      <div class="card-body">
+<pre><span class="cm">-- double dash: rest of line is ignored</span>
+<span class="kc">note</span> this is also a comment
+<span class="kc">remark</span> and so is this
+<span class="kc">comment</span> and this too
+<span class="kc">describe</span> same thing</pre>
+        <div class="pills">
+          <span class="pill p-x">--</span>
+          <span class="pill p-x">note</span>
+          <span class="pill p-x">remark</span>
+          <span class="pill p-x">comment</span>
+          <span class="pill p-x">describe</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><div class="dot" style="background:var(--muted)"></div><h3>Block Closers</h3></div>
+      <div class="card-body">
+<pre><span class="kc">done</span>     <span class="cm">-- most common</span>
+<span class="kc">end</span>
+<span class="kc">finish</span>
+<span class="kc">close</span>
+<span class="kc">stop</span>
+<span class="kc">complete</span></pre>
+        <div class="pills">
+          <span class="pill p-x">done</span>
+          <span class="pill p-x">end</span>
+          <span class="pill p-x">finish</span>
+          <span class="pill p-x">close</span>
+          <span class="pill p-x">stop</span>
+          <span class="pill p-x">complete</span>
+        </div>
+        <div class="note">Every <strong>when / loop / function / math block</strong> must end with one of these.</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ════════════════════════════ FULL EXAMPLE ════════════════════════════ -->
+  <span class="sec-anchor" id="example"></span>
+  <h2 class="sec"><span class="dot" style="background:var(--accent)"></span>Complete Example — Grade Calculator</h2>
+  <div class="grid">
+    <div class="card span-3">
+      <div class="card-head"><div class="dot" style="background:var(--accent)"></div><h3>Grade Calculator — uses every major feature</h3></div>
+      <div class="card-body">
+<pre><span class="cm">-- Grade Calculator</span>
+
+<span class="kd">store</span> <span class="s">"Alice"</span> <span class="kd">into</span> <span class="id">student</span>
+<span class="kd">store</span> <span class="kd">collection</span> <span class="n">88</span> and <span class="n">92</span> and <span class="n">75</span> and <span class="n">98</span> and <span class="n">84</span> <span class="kd">into</span> <span class="id">scores</span>
+
+<span class="cm">-- function: compute average</span>
+<span class="kf">build</span> <span class="id">average</span> <span class="kf">using</span> <span class="id">nums</span>
+  <span class="kd">store</span> <span class="kl">result of</span> <span class="id">sum</span> <span class="kl">with</span> <span class="id">nums</span> <span class="kd">into</span> <span class="id">total</span>
+  <span class="kd">store</span> <span class="kl">result of</span> <span class="id">length</span> <span class="kl">with</span> <span class="id">nums</span> <span class="kd">into</span> <span class="id">count</span>
+  <span class="kc">return</span> <span class="id">total</span> / <span class="id">count</span>
+<span class="kc">done</span>
+
+<span class="cm">-- function: assign letter grade</span>
+<span class="kf">build</span> <span class="id">grade</span> <span class="kf">using</span> <span class="id">avg</span>
+  <span class="kc">when</span> <span class="id">avg</span> <span class="cp">is at least</span> <span class="n">90</span> <span class="kc">then</span>
+    <span class="kc">return</span> <span class="s">"A"</span>
+  <span class="kc">elif</span> <span class="id">avg</span> <span class="cp">is at least</span> <span class="n">80</span> <span class="kc">then</span>
+    <span class="kc">return</span> <span class="s">"B"</span>
+  <span class="kc">elif</span> <span class="id">avg</span> <span class="cp">is at least</span> <span class="n">70</span> <span class="kc">then</span>
+    <span class="kc">return</span> <span class="s">"C"</span>
+  <span class="kc">otherwise</span>
+    <span class="kc">return</span> <span class="s">"F"</span>
+  <span class="kc">done</span>
+<span class="kc">done</span>
+
+<span class="cm">-- calculate and display</span>
+<span class="kd">store</span> <span class="kl">result of</span> <span class="id">average</span> <span class="kl">with</span> <span class="id">scores</span> <span class="kd">into</span> <span class="id">avg</span>
+<span class="kd">store</span> <span class="kl">result of</span> <span class="id">grade</span> <span class="kl">with</span> <span class="id">avg</span> <span class="kd">into</span> <span class="id">letter</span>
+<span class="ko">output</span> <span class="s">"Student: "</span> <span class="op">joined with</span> <span class="id">student</span>
+<span class="ko">output</span> <span class="s">"Average: "</span> <span class="op">joined with</span> <span class="id">avg</span>
+<span class="ko">output</span> <span class="s">"Grade:   "</span> <span class="op">joined with</span> <span class="id">letter</span>
+
+<span class="cm">-- count scores above 85</span>
+<span class="kd">store</span> <span class="n">0</span> <span class="kd">into</span> <span class="id">high</span>
+<span class="kc">go through every</span> <span class="id">s</span> <span class="kc">in</span> <span class="id">scores</span>
+  <span class="kc">when</span> <span class="id">s</span> <span class="cp">is bigger than</span> <span class="n">85</span> <span class="kc">then</span>
+    <span class="kd">increment</span> <span class="id">high</span> <span class="op">by</span> <span class="n">1</span>
+  <span class="kc">done</span>
+<span class="kc">done</span>
+<span class="ko">output</span> <span class="s">"Scores above 85: "</span> <span class="op">joined with</span> <span class="id">high</span></pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════ PIPELINE ════════════════════════════════ -->
+  <span class="sec-anchor" id="pipeline"></span>
+  <h2 class="sec"><span class="dot" style="background:var(--accent)"></span>6-Phase Compiler Pipeline</h2>
+  <div class="grid">
+    <div class="card span-3">
+      <div class="card-head"><div class="dot" style="background:var(--accent)"></div><h3>What happens when you press ▶ Run</h3></div>
+      <div class="card-body">
+        <div class="pipeline">
+          <div class="phase" style="background:rgba(91,115,255,.12);border-color:rgba(91,115,255,.3);">
+            <div class="pn" style="color:var(--accent)">PHASE 1</div>
+            <div class="pname">Lexer</div>
+            <div class="psub">Source → Tokens</div>
+          </div>
+          <div class="phase" style="background:rgba(167,139,250,.12);border-color:rgba(167,139,250,.3);">
+            <div class="pn" style="color:var(--accent2)">PHASE 2</div>
+            <div class="pname">Parser</div>
+            <div class="psub">Tokens → AST</div>
+          </div>
+          <div class="phase" style="background:rgba(74,222,128,.10);border-color:rgba(74,222,128,.25);">
+            <div class="pn" style="color:var(--green)">PHASE 3</div>
+            <div class="pname">Interpreter</div>
+            <div class="psub">AST → Output</div>
+          </div>
+          <div class="phase" style="background:rgba(251,191,36,.10);border-color:rgba(251,191,36,.25);">
+            <div class="pn" style="color:var(--amber)">PHASE 4</div>
+            <div class="pname">IR / TAC</div>
+            <div class="psub">AST → 3-Addr Code</div>
+          </div>
+          <div class="phase" style="background:rgba(45,212,191,.10);border-color:rgba(45,212,191,.25);">
+            <div class="pn" style="color:var(--teal)">PHASE 5</div>
+            <div class="pname">Optimizer</div>
+            <div class="psub">Fold · Dead · Redund</div>
+          </div>
+          <div class="phase" style="background:rgba(255,157,108,.10);border-color:rgba(255,157,108,.25);">
+            <div class="pn" style="color:var(--orange)">PHASE 6</div>
+            <div class="pname">Target</div>
+            <div class="psub">Stack ASM + Python</div>
+          </div>
+        </div>
+        <div class="note" style="margin-top:12px;">
+          View each phase's output live in the IDE via the <strong>Tokens · Syntax · Semantic · Trace · IR · Optimize · Target</strong> tabs in the right panel.
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /#page -->
+
+<footer>
+  VoxLang &nbsp;·&nbsp; Voice-First Programming Language &nbsp;·&nbsp; Full 6-Phase Compiler
+</footer>
+
+</body>
+</html>
