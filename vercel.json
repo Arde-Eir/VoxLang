@@ -4,9 +4,7 @@
     {
       "src": "api/index.py",
       "use": "@vercel/python",
-      "config": {
-        "maxLambdaSize": "50mb"
-      }
+      "config": { "maxLambdaSize": "50mb" }
     },
     {
       "src": "frontend/**",
@@ -14,20 +12,16 @@
     }
   ],
   "routes": [
-    { "src": "/health",      "dest": "/api/index.py" },
-    { "src": "/run",         "dest": "/api/index.py" },
-    { "src": "/transcribe",  "dest": "/api/index.py" },
-    { "src": "/generate",    "dest": "/api/index.py" },
-    { "src": "/correct",     "dest": "/api/index.py" },
-    { "src": "/explain",     "dest": "/api/index.py" },
-    { "src": "/suggest",     "dest": "/api/index.py" },
-    { "src": "/chat",        "dest": "/api/index.py" },
-    { "src": "/reset",       "dest": "/api/index.py" },
-    { "src": "/reference",   "dest": "/frontend/reference.html" },
-    { "src": "/(.*)",        "dest": "/frontend/$1" }
-  ],
-  "env": {
-    "GROQ_API_KEY":     "@groq_api_key",
-    "DEEPGRAM_API_KEY": "@deepgram_api_key"
-  }
+    { "src": "/health",     "dest": "/api/index.py" },
+    { "src": "/run",        "dest": "/api/index.py" },
+    { "src": "/transcribe", "dest": "/api/index.py" },
+    { "src": "/generate",   "dest": "/api/index.py" },
+    { "src": "/correct",    "dest": "/api/index.py" },
+    { "src": "/explain",    "dest": "/api/index.py" },
+    { "src": "/suggest",    "dest": "/api/index.py" },
+    { "src": "/chat",       "dest": "/api/index.py" },
+    { "src": "/reset",      "dest": "/api/index.py" },
+    { "src": "/reference",  "dest": "/frontend/reference.html" },
+    { "src": "/(.*)",       "dest": "/frontend/$1" }
+  ]
 }
