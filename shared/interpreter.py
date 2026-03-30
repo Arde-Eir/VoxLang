@@ -1,0 +1,769 @@
+"""
+VoxLang Interpreter — Phase 3
+Executes VoxLang AST with full transparency.
+"""
+
+import math
+from decimal import Decimal, getcontext
+from shared.grammar import (
+    StoreNode, UpdateNode, RaiseNode, LowerNode,
+    OutputNode, InputNode, BuildNode, UseNode, CaptureNode,
+    DoThisNode, GoThroughNode, KeepGoingNode, WhenNode,
+    ReturnNode, SolveNode, MathBlockNode, CommentNode,
+    AddToNode, RemoveFromNode,
+    BinOpNode, UnaryOpNode, CompNode, CollectionNode,
+    UseExprNode, CaptureExprNode, IdentNode, LiteralNode,
+    FormulaNode, JoinedNode, IndexNode,
+)
+
+getcontext().prec = 28
+
+
+class ReturnSignal(Exception):
+    def __init__(self, v): self.value = v
+
+class VoxLangError(Exception):
+    pass
+
+class InputNeeded(Exception):
+    def __init__(self, prompt: str, var_name: str):
+        self.prompt   = prompt
+        self.var_name = var_name
+
+
+class SymbolEntry:
+    def __init__(self, name, value, precise=False, scope="global", line=0):
+        self.name    = name
+        self.value   = value
+        self.precise = precise
+        self.scope   = scope
+        self.line    = line
+
+    @property
+    def vtype(self):
+        if isinstance(self.value, bool):    return "bool"
+        if isinstance(self.value, Decimal): return "precise"
+        if isinstance(self.value, int):     return "num"
+        if isinstance(self.value, float):   return "num"
+        if isinstance(self.value, str):     return "text"
+        if isinstance(self.value, list):    return "collection"
+        return "unknown"
+
+    @property
+    def width(self):
+        if isinstance(self.value, bool):    return "bool-1"
+        if isinstance(self.value, Decimal): return "precise-128"
+        if isinstance(self.value, int):     return "int-32"
+        if isinstance(self.value, float):   return "float-64"
+        if isinstance(self.value, str):     return f"string-{len(self.value)*8}"
+        if isinstance(self.value, list):    return f"collection-{len(self.value)}"
+        return "unknown"
+
+
+class Environment:
+    def __init__(self, parent=None, scope_name="global", is_function=False):
+        self.vars        = {}
+        self.parent      = parent
+        self.scope_name  = scope_name
+        self.depth       = (parent.depth + 1) if parent else 0
+        self.is_function = is_function
+
+    def get(self, name, line=0):
+        if name in self.vars:
+            return self.vars[name].value
+        if self.parent:
+            return self.parent.get(name, line)
+        similar = self._find_similar(name)
+        hint = f" Did you mean '{similar}'?" if similar else f" Try: store 0 into {name}"
+        raise VoxLangError(f"Line {line}: '{name}' is not defined.{hint}")
+
+    def get_entry(self, name):
+        if name in self.vars:
+            return self.vars[name]
+        if self.parent:
+            return self.parent.get_entry(name)
+        return None
+
+    def _find_similar(self, name):
+        all_vars = list(self.vars.keys())
+        if self.parent:
+            all_vars += list(self.parent.vars.keys())
+        for v in all_vars:
+            if v.lower() == name.lower() or name.lower() in v.lower():
+                return v
+        return None
+
+    def set(self, name, value, precise=False, line=0):
+        self.vars[name] = SymbolEntry(name, value, precise, self.scope_name, line)
+
+    def assign(self, name, value, line=0):
+        if name in self.vars:
+            self.vars[name].value = value
+        elif self.parent and not self.is_function:
+            self.parent.assign(name, value, line)
+        else:
+            self.vars[name] = SymbolEntry(name, value, False, self.scope_name, line)
+
+    def has(self, name):
+        if name in self.vars: return True
+        if self.parent:       return self.parent.has(name)
+        return False
+
+    def has_local(self, name):
+        if name in self.vars: return True
+        if self.parent and not self.is_function:
+            return self.parent.has_local(name)
+        return False
+
+    def all_symbols(self):
+        symbols = {}
+        if self.parent:
+            symbols.update(self.parent.all_symbols())
+        symbols.update(self.vars)
+        return symbols
+
+
+class Interpreter:
+    def __init__(self):
+        self.global_env   = Environment(scope_name="global")
+        self.output_log   = []
+        self.warnings     = []
+        self.trace_log    = []
+        self.semantic_log = []
+        self.input_hook   = None
+        self._scope_depth = 0
+        self._line_count  = 0
+        self._symbol_log_index = {}
+        self._symbol_log_list  = []
+        self._setup_builtins()
+
+    def _record_symbol(self, entry: SymbolEntry):
+        if isinstance(entry.value, BuildNode): return
+        key = (entry.name, entry.scope)
+        sym = {
+            "name":        entry.name,
+            "type":        entry.vtype,
+            "value":       self._display(entry.value),
+            "scope":       entry.scope,
+            "scope_level": self._scope_level(entry.scope),
+            "line":        str(entry.line),
+        }
+        if key in self._symbol_log_index:
+            self._symbol_log_list[self._symbol_log_index[key]] = sym
+        else:
+            self._symbol_log_index[key] = len(self._symbol_log_list)
+            self._symbol_log_list.append(sym)
+
+    @staticmethod
+    def _scope_level(scope_name: str) -> int:
+        if scope_name == "global":              return 0
+        if scope_name.startswith("function:"): return 1
+        return min(len(scope_name.split(":")), 4)
+
+    def _setup_builtins(self):
+        self.builtins = {
+            "length":    lambda a: len(a[0]) if a else 0,
+            "reverse":   lambda a: list(reversed(a[0])) if a else [],
+            "sum":       lambda a: sum(a[0]) if a else 0,
+            "max":       lambda a: max(a[0]) if a else None,
+            "min":       lambda a: min(a[0]) if a else None,
+            "text":      lambda a: str(a[0]) if a else "",
+            "number":    lambda a: float(a[0]) if a else 0,
+            "round":     lambda a: round(float(a[0]), int(a[1]) if len(a) > 1 else 0) if a else 0,
+            "abs":       lambda a: abs(a[0]) if a else 0,
+            "contains":  lambda a: a[1] in a[0] if len(a) >= 2 else False,
+            "join":      lambda a: (a[1] if len(a) > 1 else " ").join(str(x) for x in a[0]) if a else "",
+            "split":     lambda a: a[0].split(a[1] if len(a) > 1 else " ") if a else [],
+            "upper":     lambda a: str(a[0]).upper() if a else "",
+            "lower":     lambda a: str(a[0]).lower() if a else "",
+            "range":     lambda a: list(range(int(a[0]), int(a[1]) + 1)) if len(a) >= 2 else list(range(int(a[0]))),
+            "sqrt":      lambda a: math.sqrt(float(a[0])) if a else 0,
+            "power":     lambda a: float(a[0]) ** float(a[1]) if len(a) >= 2 else float(a[0]),
+            "floor":     lambda a: math.floor(float(a[0])) if a else 0,
+            "ceiling":   lambda a: math.ceil(float(a[0])) if a else 0,
+            "factorial": lambda a: math.factorial(int(a[0])) if a else 1,
+            "sin":       lambda a: math.sin(math.radians(float(a[0]))) if a else 0,
+            "cos":       lambda a: math.cos(math.radians(float(a[0]))) if a else 0,
+            "tan":       lambda a: math.tan(math.radians(float(a[0]))) if a else 0,
+            "log":       lambda a: math.log(float(a[0]), float(a[1]) if len(a) > 1 else math.e) if a else 0,
+            "log10":     lambda a: math.log10(float(a[0])) if a else 0,
+            "random":    lambda a: __import__("random").uniform(float(a[0]), float(a[1])) if len(a) >= 2 else __import__("random").random(),
+            # String utilities
+            "trim":      lambda a: str(a[0]).strip() if a else "",
+            "startswith":lambda a: str(a[0]).startswith(str(a[1])) if len(a) >= 2 else False,
+            "endswith":  lambda a: str(a[0]).endswith(str(a[1])) if len(a) >= 2 else False,
+            "replace":   lambda a: str(a[0]).replace(str(a[1]), str(a[2])) if len(a) >= 3 else str(a[0]),
+            "index":     lambda a: a[0].index(a[1]) if len(a) >= 2 and isinstance(a[0], list) else str(a[0]).index(str(a[1])),
+            "slice":     lambda a: a[0][int(a[1]):int(a[2])] if len(a) >= 3 else a[0][int(a[1]):],
+            "sort":      lambda a: sorted(a[0]) if a else [],
+            "unique":    lambda a: list(dict.fromkeys(a[0])) if a else [],
+            "flat":      lambda a: [x for sub in a[0] for x in (sub if isinstance(sub, list) else [sub])] if a else [],
+            "type":      lambda a: self._type_name(a[0]) if a else "unknown",
+        }
+
+    def _type_name(self, val):
+        if isinstance(val, bool):    return "bool"
+        if isinstance(val, Decimal): return "precise"
+        if isinstance(val, int):     return "num"
+        if isinstance(val, float):   return "num"
+        if isinstance(val, str):     return "text"
+        if isinstance(val, list):    return "collection"
+        return "unknown"
+
+    def precheck(self, ast):
+        warnings = []
+        defined  = set(self.builtins.keys())
+
+        def scan(nodes, scope):
+            for node in nodes:
+                if node is None: continue
+                if isinstance(node, StoreNode):
+                    scope.add(node.name)
+                    scan_expr(node.value, scope)
+                elif isinstance(node, InputNode):
+                    scope.add(node.into)
+                elif isinstance(node, UpdateNode):
+                    if node.name not in scope:
+                        warnings.append(f"⚠️  Line {node.line}: Updating '{node.name}' but it was never defined.\n   Fix: store 0 into {node.name}")
+                    scan_expr(node.value, scope)
+                elif isinstance(node, RaiseNode):
+                    if node.name not in scope:
+                        warnings.append(f"⚠️  Line {node.line}: Raising '{node.name}' but it was never defined.\n   Fix: store 0 into {node.name}")
+                elif isinstance(node, LowerNode):
+                    if node.name not in scope:
+                        warnings.append(f"⚠️  Line {node.line}: Lowering '{node.name}' but it was never defined.\n   Fix: store 0 into {node.name}")
+                elif isinstance(node, OutputNode):
+                    scan_expr(node.value, scope)
+                elif isinstance(node, BuildNode):
+                    scope.add(node.name)
+                    scan(node.body, set(scope) | set(node.params))
+                elif isinstance(node, DoThisNode):
+                    scan(node.body, set(scope) | {"index"})
+                elif isinstance(node, GoThroughNode):
+                    if node.iterable not in scope:
+                        warnings.append(f"⚠️  Line {node.line}: '{node.iterable}' used in loop but never defined.\n   Fix: store collection 1 and 2 and 3 into {node.iterable}")
+                    scan(node.body, set(scope) | {node.var})
+                elif isinstance(node, WhenNode):
+                    scan_expr(node.condition, scope)
+                    scan(node.then_block, set(scope))
+                    scan(node.else_block, set(scope))
+                elif isinstance(node, SolveNode):
+                    scope.add(node.var)
+                    scope.add(node.var + "2")
+                elif isinstance(node, CaptureNode):
+                    scope.add(node.name)
+                elif isinstance(node, MathBlockNode):
+                    scan(node.body, scope)
+
+        def scan_expr(node, scope):
+            if isinstance(node, IdentNode):
+                if node.name not in scope and node.name not in self.builtins:
+                    warnings.append(f"⚠️  Line {node.line}: '{node.name}' used but never defined.\n   Fix: store <value> into {node.name}")
+            elif isinstance(node, BinOpNode):
+                scan_expr(node.left, scope)
+                if node.right: scan_expr(node.right, scope)
+            elif isinstance(node, UnaryOpNode):
+                scan_expr(node.operand, scope)
+            elif isinstance(node, CompNode):
+                scan_expr(node.left, scope)
+                if node.right: scan_expr(node.right, scope)
+
+        scan(ast, defined)
+        return warnings
+
+    def run(self, ast, env=None):
+        self.output_log        = []
+        self.warnings          = self.precheck(ast)
+        self.trace_log         = []
+        self.semantic_log      = []
+        self._line_count       = 0
+        self._symbol_log_index = {}
+        self._symbol_log_list  = []
+        env = env or self.global_env
+
+        try:
+            self._exec_block(ast, env)
+        except ReturnSignal:
+            pass
+        except InputNeeded:
+            self._build_semantic_log(env)
+            raise
+        except VoxLangError as e:
+            self.output_log.append(f"❌ {e}")
+            self.trace_log.append(f"❌ ERROR: {e}")
+        except Exception as e:
+            self.output_log.append(f"❌ Unexpected error: {e}")
+
+        self._build_semantic_log(env)
+        return self.warnings + self.output_log
+
+    def _build_semantic_log(self, env):
+        self.semantic_log = [{
+            "header": ["Name","Type","Width","Value","Scope","Line"],
+            "rows": [
+                [e.name, e.vtype, e.width, self._display(e.value), e.scope, str(e.line)]
+                for e in env.all_symbols().values()
+                if not callable(e.value)
+            ]
+        }]
+
+    def _exec_block(self, stmts, env):
+        for s in stmts:
+            if s: self._exec(s, env)
+
+    def _exec(self, node, env):
+        self._line_count += 1
+        scope  = env.scope_name
+        indent = "  " * env.depth
+
+        if isinstance(node, StoreNode):
+            val = self._eval(node.value, env)
+            if node.precise and isinstance(val, (int, float)):
+                val = Decimal(str(val))
+            if env.has_local(node.name):
+                env.assign(node.name, val)
+            else:
+                env.set(node.name, val, node.precise, getattr(node, "line", 0))
+            entry = env.get_entry(node.name)
+            if entry: self._record_symbol(entry)
+            self.trace_log.append(
+                f"{indent}Line {self._line_count:>3}  STORE    {node.name} = {self._display(val)}  [{self._width_of(val)}]  scope:{scope}"
+            )
+
+        elif isinstance(node, UpdateNode):
+            if not env.has(node.name):
+                raise VoxLangError(f"Line {node.line}: Cannot update '{node.name}' — not defined.\n   Fix: store 0 into {node.name}")
+            val = self._eval(node.value, env)
+            env.assign(node.name, val)
+            entry = env.get_entry(node.name)
+            if entry: self._record_symbol(entry)
+            self.trace_log.append(f"{indent}Line {self._line_count:>3}  UPDATE   {node.name} → {self._display(val)}  scope:{scope}")
+
+        elif isinstance(node, RaiseNode):
+            if not env.has(node.name):
+                raise VoxLangError(f"Line {node.line}: Cannot raise '{node.name}' — not defined.\n   Fix: store 0 into {node.name}")
+            current = env.get(node.name, getattr(node, "line", 0))
+            amount  = self._eval(node.amount, env)
+            self._assert_numbers(current, amount, "raise by")
+            new_val = current + amount
+            env.assign(node.name, new_val)
+            entry = env.get_entry(node.name)
+            if entry: self._record_symbol(entry)
+            self.trace_log.append(
+                f"{indent}Line {self._line_count:>3}  RAISE    {node.name}: {self._display(current)} + {self._display(amount)} = {self._display(new_val)}  scope:{scope}"
+            )
+
+        elif isinstance(node, LowerNode):
+            if not env.has(node.name):
+                raise VoxLangError(f"Line {node.line}: Cannot lower '{node.name}' — not defined.\n   Fix: store 0 into {node.name}")
+            current = env.get(node.name, getattr(node, "line", 0))
+            amount  = self._eval(node.amount, env)
+            self._assert_numbers(current, amount, "lower by")
+            new_val = current - amount
+            env.assign(node.name, new_val)
+            entry = env.get_entry(node.name)
+            if entry: self._record_symbol(entry)
+            self.trace_log.append(
+                f"{indent}Line {self._line_count:>3}  LOWER    {node.name}: {self._display(current)} - {self._display(amount)} = {self._display(new_val)}  scope:{scope}"
+            )
+
+        elif isinstance(node, AddToNode):
+            if not env.has(node.collection):
+                raise VoxLangError(f"Line {node.line}: '{node.collection}' is not defined.")
+            lst = env.get(node.collection)
+            if not isinstance(lst, list):
+                raise VoxLangError(f"Line {node.line}: '{node.collection}' is not a collection.")
+            val = self._eval(node.value, env)
+            lst = lst + [val]  # immutable-style append
+            env.assign(node.collection, lst)
+            entry = env.get_entry(node.collection)
+            if entry: self._record_symbol(entry)
+            self.trace_log.append(f"{indent}Line {self._line_count:>3}  APPEND   {self._display(val)} → {node.collection}  scope:{scope}")
+
+        elif isinstance(node, RemoveFromNode):
+            if not env.has(node.collection):
+                raise VoxLangError(f"Line {node.line}: '{node.collection}' is not defined.")
+            lst = env.get(node.collection)
+            if not isinstance(lst, list):
+                raise VoxLangError(f"Line {node.line}: '{node.collection}' is not a collection.")
+            val = self._eval(node.value, env)
+            try:
+                new_lst = list(lst)
+                new_lst.remove(val)
+                env.assign(node.collection, new_lst)
+                entry = env.get_entry(node.collection)
+                if entry: self._record_symbol(entry)
+            except ValueError:
+                raise VoxLangError(f"Line {node.line}: {self._display(val)} is not in '{node.collection}'.")
+            self.trace_log.append(f"{indent}Line {self._line_count:>3}  REMOVE   {self._display(val)} from {node.collection}  scope:{scope}")
+
+        elif isinstance(node, OutputNode):
+            val = self._eval(node.value, env)
+            out = self._display(val)
+            self.output_log.append(out)
+            self.trace_log.append(f"{indent}Line {self._line_count:>3}  OUTPUT   \"{out}\"  scope:{scope}")
+
+        elif isinstance(node, InputNode):
+            if self.input_hook is not None:
+                raw = self.input_hook(node.prompt, node.into)
+            else:
+                raise InputNeeded(node.prompt, node.into)
+            result = self._coerce_input(raw, node.into, env)
+            if env.has_local(node.into):
+                env.assign(node.into, result)
+            else:
+                env.set(node.into, result)
+            entry = env.get_entry(node.into)
+            if entry: self._record_symbol(entry)
+            self.trace_log.append(
+                f"{indent}Line {self._line_count:>3}  INPUT    asked \"{node.prompt}\" → stored in {node.into} = {self._display(result)}  [{self._width_of(result)}]  scope:{scope}"
+            )
+
+        elif isinstance(node, BuildNode):
+            env.set(node.name, node)
+            self.trace_log.append(
+                f"{indent}Line {self._line_count:>3}  BUILD    function '{node.name}' defined  params:[{', '.join(node.params)}]  scope:{scope}"
+            )
+
+        elif isinstance(node, UseNode):
+            self._call(node.name, node.args, env, getattr(node, "line", 0))
+
+        elif isinstance(node, CaptureNode):
+            result = self._call(node.func, node.args, env, getattr(node, "line", 0))
+            value  = result if result is not None else "nothing"
+            if env.has_local(node.name):
+                env.assign(node.name, value)
+            else:
+                env.set(node.name, value)
+            entry = env.get_entry(node.name)
+            if entry: self._record_symbol(entry)
+            self.trace_log.append(
+                f"{indent}Line {self._line_count:>3}  CAPTURE  result of {node.func}() → {node.name} = {self._display(result)}  scope:{scope}"
+            )
+
+        elif isinstance(node, DoThisNode):
+            count = int(self._eval(node.count, env))
+            self.trace_log.append(f"{indent}Line {self._line_count:>3}  LOOP     do this {count} times  scope:{scope}")
+            for i in range(count):
+                child = Environment(env, scope_name=f"loop:{i+1}")
+                child.set("index", i + 1)
+                self._record_symbol(child.vars["index"])
+                self.trace_log.append(f"{indent}  → iteration {i+1} of {count}")
+                self._exec_block(node.body, child)
+
+        elif isinstance(node, GoThroughNode):
+            lst = env.get(node.iterable, getattr(node, "line", 0))
+            if not isinstance(lst, list): lst = list(lst)
+            self.trace_log.append(f"{indent}Line {self._line_count:>3}  FOREACH  go through every {node.var} in {node.iterable} ({len(lst)} items)  scope:{scope}")
+            for i, item in enumerate(lst):
+                child = Environment(env, scope_name=f"foreach:{node.iterable}")
+                child.set(node.var, item, line=getattr(node, "line", 0))
+                self._record_symbol(child.vars[node.var])
+                self.trace_log.append(f"{indent}  → {node.var} = {self._display(item)}")
+                self._exec_block(node.body, child)
+
+        elif isinstance(node, KeepGoingNode):
+            guard = 0
+            self.trace_log.append(f"{indent}Line {self._line_count:>3}  WHILE    keep going while condition  scope:{scope}")
+            while self._eval_cond(node.condition, env):
+                guard += 1
+                if guard > 10000:
+                    raise VoxLangError(
+                        "Loop ran more than 10,000 times.\n"
+                        "   The condition never became false.\n"
+                        "   Check that you are updating the variable inside the loop."
+                    )
+                self.trace_log.append(f"{indent}  → iteration {guard} (condition true)")
+                self._exec_block(node.body, Environment(env, scope_name=f"while:{guard}"))
+
+        elif isinstance(node, WhenNode):
+            result = self._eval_cond(node.condition, env)
+            self.trace_log.append(
+                f"{indent}Line {self._line_count:>3}  WHEN     condition → {'true, taking then-branch' if result else 'false, taking otherwise-branch'}  scope:{scope}"
+            )
+            if result:
+                self._exec_block(node.then_block, Environment(env, scope_name="when:then"))
+            elif node.else_block:
+                self._exec_block(node.else_block, Environment(env, scope_name="when:otherwise"))
+
+        elif isinstance(node, ReturnNode):
+            val = self._eval(node.value, env)
+            self.trace_log.append(f"{indent}Line {self._line_count:>3}  RETURN   {self._display(val)}  scope:{scope}")
+            raise ReturnSignal(val)
+
+        elif isinstance(node, SolveNode):
+            result = self._solve(node, env)
+            env.set(node.var, result, False, getattr(node, "line", 0))
+            entry = env.get_entry(node.var)
+            if entry: self._record_symbol(entry)
+            self.trace_log.append(f"{indent}Line {self._line_count:>3}  SOLVE    {node.var} = {self._display(result)}  scope:{scope}")
+
+        elif isinstance(node, MathBlockNode):
+            self.trace_log.append(f"{indent}Line {self._line_count:>3}  MATHBLOCK  entering math block  scope:{scope}")
+            self._exec_block(node.body, env)
+
+        elif isinstance(node, CommentNode):
+            self.trace_log.append(f"{indent}Line {self._line_count:>3}  COMMENT  -- {node.text}")
+
+    def _call(self, name, arg_nodes, env, line=0):
+        args = [self._eval(a, env) for a in arg_nodes]
+        self.trace_log.append(
+            f"{'  ' * env.depth}  CALL     {name}({', '.join(self._display(a) for a in args)})  scope:{env.scope_name}"
+        )
+        if name in self.builtins:
+            try:
+                result = self.builtins[name](args)
+                self.trace_log.append(f"{'  ' * env.depth}  RESULT   {name}() → {self._display(result)}")
+                return result
+            except Exception as e:
+                raise VoxLangError(f"Line {line}: Error in '{name}': {e}")
+
+        fn_entry = env.get_entry(name)
+        if fn_entry is None:
+            raise VoxLangError(f"Line {line}: '{name}' is not defined.\n   Fix: build {name} using ... done")
+        fn = fn_entry.value
+
+        if not isinstance(fn, BuildNode):
+            raise VoxLangError(f"Line {line}: '{name}' is not a function.")
+        if len(args) != len(fn.params):
+            raise VoxLangError(
+                f"Line {line}: '{name}' needs {len(fn.params)} input(s) ({', '.join(fn.params)}) but you gave {len(args)}."
+            )
+
+        child = Environment(self.global_env, scope_name=f"function:{name}", is_function=True)
+        for p, v in zip(fn.params, args):
+            child.set(p, v)
+            self._record_symbol(child.vars[p])
+
+        try:
+            self._exec_block(fn.body, child)
+        except ReturnSignal as r:
+            return r.value
+        return None
+
+    def _eval(self, node, env):
+        if isinstance(node, LiteralNode):
+            return node.value
+
+        if isinstance(node, IdentNode):
+            return env.get(node.name, node.line)
+
+        if isinstance(node, IndexNode):
+            coll = env.get(node.collection, node.line)
+            idx  = int(self._eval(node.index, env))
+            if not isinstance(coll, (list, str)):
+                raise VoxLangError(f"Line {node.line}: '{node.collection}' is not indexable.")
+            if idx < 0 or idx >= len(coll):
+                raise VoxLangError(f"Line {node.line}: Index {idx} is out of range (size {len(coll)}).")
+            return coll[idx]
+
+        if isinstance(node, UnaryOpNode):
+            operand = self._eval(node.operand, env)
+            if node.op == "-":
+                if not isinstance(operand, (int, float, Decimal)):
+                    raise VoxLangError(f"Cannot negate '{operand}' — it is not a number.")
+                return -operand
+            if node.op == "not":
+                return not bool(operand)
+
+        if isinstance(node, BinOpNode):
+            l = self._eval(node.left, env)
+            r = self._eval(node.right, env) if node.right is not None else None
+            if node.op == "+":
+                if isinstance(l, str) or isinstance(r, str):
+                    return str(l) + str(r)
+                return l + r
+            if node.op == "-":   self._assert_numbers(l, r, "-");    return l - r
+            if node.op == "*":   self._assert_numbers(l, r, "*");    return l * r
+            if node.op == "/":
+                self._assert_numbers(l, r, "/")
+                if r == 0: raise VoxLangError("Division by zero.\n   Dividing by zero is undefined in mathematics.")
+                return l / r
+            if node.op == "%":
+                self._assert_numbers(l, r, "%")
+                if r == 0: raise VoxLangError("Modulo by zero is undefined.")
+                return l % r
+            if node.op == "**": self._assert_numbers(l, r, "to the power of"); return l ** r
+            if node.op == "<<": return int(l) << int(r)
+            if node.op == ">>": return int(l) >> int(r)
+            if node.op == "percent":
+                self._assert_numbers(l, r, "percent of"); return (l / 100) * r
+
+        if isinstance(node, JoinedNode):
+            l = self._eval(node.left, env)
+            r = self._eval(node.right, env)
+            return str(l) + str(r)
+
+        if isinstance(node, CollectionNode):
+            return [self._eval(i, env) for i in node.items]
+
+        if isinstance(node, UseExprNode):
+            return self._call(node.name, node.args, env)
+
+        if isinstance(node, CaptureExprNode):
+            return self._call(node.func, node.args, env)
+
+        if isinstance(node, CompNode):
+            return self._eval_cond(node, env)
+
+        if isinstance(node, FormulaNode):
+            return self._formula(node, env)
+
+        return None
+
+    def _eval_cond(self, node, env):
+        if isinstance(node, CompNode):
+            if node.op == "and":
+                return self._eval_cond(node.left, env) and self._eval_cond(node.right, env)
+            if node.op == "or":
+                return self._eval_cond(node.left, env) or self._eval_cond(node.right, env)
+            l = self._eval(node.left, env)
+            if node.op == "is_true":    return bool(l)
+            if node.op == "is_false":   return not bool(l)
+            if node.op == "is_empty":   return l in ([], "", None, 0)
+            if node.op == "is_nothing": return l is None or l == ""
+            r = self._eval(node.right, env)
+            if node.op == "==": return l == r
+            if node.op == "!=": return l != r
+            if node.op == ">":  self._assert_numbers(l, r, "is bigger than");  return l > r
+            if node.op == "<":  self._assert_numbers(l, r, "is smaller than"); return l < r
+            if node.op == ">=": return l >= r
+            if node.op == "<=": return l <= r
+        return bool(self._eval(node, env))
+
+    def _formula(self, node, env):
+        kw = {k: self._eval(v, env) for k, v in node.kwargs.items()}
+        if node.name == "circle":
+            r = float(kw.get("radius", 0))
+            return round(math.pi * r * r, 10)
+        if node.name == "hypotenuse":
+            a = float(kw.get("a", 0)); b = float(kw.get("b", 0))
+            return round(math.sqrt(a**2 + b**2), 10)
+        if node.name == "volume_sphere":
+            r = float(kw.get("radius", 0))
+            return round((4/3) * math.pi * r**3, 10)
+        if node.name == "sqrt":
+            x = float(kw.get("x", 0))
+            if x < 0: raise VoxLangError(f"Cannot take square root of a negative number ({x}).")
+            return round(math.sqrt(x), 10)
+        raise VoxLangError(f"Unknown formula '{node.name}'.")
+
+    def _solve(self, node, env):
+        var    = node.var
+        tokens = node.lhs_tokens
+        rhs    = self._eval(node.rhs, env)
+        coeff2 = 0.0; coeff1 = 0.0; const = 0.0
+        i = 0
+
+        def _skip_times(idx):
+            if idx < len(tokens) and tokens[idx].value in ("*","times"):
+                return idx + 1
+            return idx
+
+        def _is_coeff_var_squared(idx):
+            if tokens[idx].type != "NUMBER": return False
+            n = _skip_times(idx + 1)
+            if n >= len(tokens) or tokens[n].value != var: return False
+            n2 = n + 1
+            return n2 < len(tokens) and tokens[n2].value in ("squared","^")
+
+        def _is_coeff_var(idx):
+            if tokens[idx].type != "NUMBER": return False
+            n = _skip_times(idx + 1)
+            if n >= len(tokens) or tokens[n].value != var: return False
+            n2 = n + 1
+            return not (n2 < len(tokens) and tokens[n2].value in ("squared","^"))
+
+        def _len_coeff_var_squared(idx):
+            n = _skip_times(idx + 1)
+            return (n + 2) - idx
+
+        def _len_coeff_var(idx):
+            n = _skip_times(idx + 1)
+            return (n + 1) - idx
+
+        while i < len(tokens):
+            t = tokens[i]
+            if _is_coeff_var_squared(i):
+                coeff2 += float(t.value); i += _len_coeff_var_squared(i); continue
+            if _is_coeff_var(i):
+                coeff1 += float(t.value); i += _len_coeff_var(i); continue
+            if t.value == var:
+                if i + 1 < len(tokens) and tokens[i+1].value in ("squared","^"):
+                    coeff2 += 1.0; i += 2; continue
+                else:
+                    coeff1 += 1.0; i += 1; continue
+            if t.value in ("plus","+") and i + 1 < len(tokens):
+                nxt_i = i + 1
+                if tokens[nxt_i].type == "NUMBER":
+                    if _is_coeff_var_squared(nxt_i):
+                        coeff2 += float(tokens[nxt_i].value); i = nxt_i + _len_coeff_var_squared(nxt_i); continue
+                    if _is_coeff_var(nxt_i):
+                        coeff1 += float(tokens[nxt_i].value); i = nxt_i + _len_coeff_var(nxt_i); continue
+                    const += float(tokens[nxt_i].value); i += 2; continue
+            if t.value in ("minus","-") and i + 1 < len(tokens):
+                nxt_i = i + 1
+                if tokens[nxt_i].type == "NUMBER":
+                    if _is_coeff_var_squared(nxt_i):
+                        coeff2 -= float(tokens[nxt_i].value); i = nxt_i + _len_coeff_var_squared(nxt_i); continue
+                    if _is_coeff_var(nxt_i):
+                        coeff1 -= float(tokens[nxt_i].value); i = nxt_i + _len_coeff_var(nxt_i); continue
+                    const -= float(tokens[nxt_i].value); i += 2; continue
+            i += 1
+
+        if coeff2 != 0:
+            a = coeff2; b = coeff1; c = const - rhs
+            discriminant = b**2 - 4*a*c
+            if discriminant < 0:
+                raise VoxLangError(f"No real solutions (discriminant = {discriminant:.4f}).")
+            if discriminant == 0:
+                result = -b / (2*a)
+                return int(result) if result == int(result) else round(result, 10)
+            x1 = (-b + math.sqrt(discriminant)) / (2*a)
+            x2 = (-b - math.sqrt(discriminant)) / (2*a)
+            x1 = int(x1) if x1 == int(x1) else round(x1, 10)
+            x2 = int(x2) if x2 == int(x2) else round(x2, 10)
+            env.set(var, x1); env.set(var + "2", x2)
+            self.output_log.append(f"Two solutions: {var} = {x1} and {var}2 = {x2}")
+            return x1
+
+        if coeff1 == 0:
+            raise VoxLangError(f"Could not find '{var}' in the equation.")
+        result = (rhs - const) / coeff1
+        return int(result) if result == int(result) else round(result, 10)
+
+    def _coerce_input(self, raw: str, var_name: str, env) -> object:
+        existing = env.get_entry(var_name)
+        if existing is not None and isinstance(existing.value, (int, float)):
+            try:
+                f = float(raw.strip())
+                return int(f) if f == int(f) else f
+            except (ValueError, AttributeError):
+                return raw
+        try:
+            f = float(raw.strip())
+            return int(f) if f == int(f) else f
+        except (ValueError, AttributeError):
+            return raw
+
+    def _assert_numbers(self, l, r, op):
+        if not isinstance(l, (int, float, Decimal)):
+            raise VoxLangError(f"Cannot use '{op}' on '{l}' — it is text, not a number.")
+        if r is not None and not isinstance(r, (int, float, Decimal)):
+            raise VoxLangError(f"Cannot use '{op}' on '{r}' — it is text, not a number.")
+
+    def _width_of(self, val):
+        if isinstance(val, bool):    return "bool-1"
+        if isinstance(val, Decimal): return "precise-128"
+        if isinstance(val, int):     return "int-32"
+        if isinstance(val, float):   return "float-64"
+        if isinstance(val, str):     return f"string-{len(val)*8}"
+        if isinstance(val, list):    return f"collection-{len(val)}"
+        return "unknown"
+
+    def _display(self, val):
+        if isinstance(val, list):    return "[" + ", ".join(self._display(v) for v in val) + "]"
+        if isinstance(val, bool):    return "true" if val else "false"
+        if isinstance(val, Decimal): return str(val)
+        if isinstance(val, float) and val == int(val): return str(int(val))
+        return str(val) if val is not None else "nothing"
