@@ -13,7 +13,7 @@ from shared.grammar import (
     AddToNode, RemoveFromNode,
     BinOpNode, UnaryOpNode, CompNode, CollectionNode,
     UseExprNode, CaptureExprNode, IdentNode, LiteralNode,
-    FormulaNode, JoinedNode, IndexNode,
+    FormulaNode, JoinedNode,
 )
 
 getcontext().prec = 28
@@ -22,10 +22,17 @@ getcontext().prec = 28
 class ReturnSignal(Exception):
     def __init__(self, v): self.value = v
 
+
 class VoxLangError(Exception):
     pass
 
+
 class InputNeeded(Exception):
+    """
+    Raised by the interpreter when an InputNode is hit and no value
+    has been pre-supplied. Carries the prompt text and the variable
+    name that should receive the answer.
+    """
     def __init__(self, prompt: str, var_name: str):
         self.prompt   = prompt
         self.var_name = var_name
@@ -60,6 +67,7 @@ class SymbolEntry:
         return "unknown"
 
 
+# ── Environment ───────────────────────────────────────────────────────────────
 class Environment:
     def __init__(self, parent=None, scope_name="global", is_function=False):
         self.vars        = {}
@@ -74,7 +82,8 @@ class Environment:
         if self.parent:
             return self.parent.get(name, line)
         similar = self._find_similar(name)
-        hint = f" Did you mean '{similar}'?" if similar else f" Try: store 0 into {name}"
+        hint = f" Did you mean '{similar}'?" if similar else \
+               f" Try: store 0 into {name}"
         raise VoxLangError(f"Line {line}: '{name}' is not defined.{hint}")
 
     def get_entry(self, name):
@@ -97,6 +106,8 @@ class Environment:
         self.vars[name] = SymbolEntry(name, value, precise, self.scope_name, line)
 
     def assign(self, name, value, line=0):
+        """Update an existing variable, walking UP the scope chain.
+        Stops at function boundaries."""
         if name in self.vars:
             self.vars[name].value = value
         elif self.parent and not self.is_function:
@@ -105,12 +116,15 @@ class Environment:
             self.vars[name] = SymbolEntry(name, value, False, self.scope_name, line)
 
     def has(self, name):
-        if name in self.vars: return True
-        if self.parent:       return self.parent.has(name)
+        if name in self.vars:
+            return True
+        if self.parent:
+            return self.parent.has(name)
         return False
 
     def has_local(self, name):
-        if name in self.vars: return True
+        if name in self.vars:
+            return True
         if self.parent and not self.is_function:
             return self.parent.has_local(name)
         return False
@@ -123,22 +137,34 @@ class Environment:
         return symbols
 
 
+# ── Interpreter ───────────────────────────────────────────────────────────────
 class Interpreter:
     def __init__(self):
         self.global_env   = Environment(scope_name="global")
         self.output_log   = []
         self.warnings     = []
         self.trace_log    = []
+        self.token_log    = []
+        self.syntax_log   = []
         self.semantic_log = []
         self.input_hook   = None
         self._scope_depth = 0
         self._line_count  = 0
-        self._symbol_log_index = {}
-        self._symbol_log_list  = []
+        # ── symbol_log: captures every variable at the moment it is defined,
+        #    including locals inside functions/loops that are destroyed after
+        #    execution. Each entry is a dict with all fields needed for the
+        #    symbol table. Later entries for the same (name, scope) pair
+        #    overwrite earlier ones so we always show the final value.
+        self._symbol_log_index = {}   # (name, scope) → index in _symbol_log_list
+        self._symbol_log_list  = []   # ordered list of symbol dicts
         self._setup_builtins()
 
+    # ── Record a variable into the persistent symbol log ─────────────────────
     def _record_symbol(self, entry: SymbolEntry):
-        if isinstance(entry.value, BuildNode): return
+        """Called every time a variable is set or updated anywhere.
+        Skips BuildNode (function definitions) — those are not data variables."""
+        if isinstance(entry.value, BuildNode):
+            return
         key = (entry.name, entry.scope)
         sym = {
             "name":        entry.name,
@@ -156,9 +182,12 @@ class Interpreter:
 
     @staticmethod
     def _scope_level(scope_name: str) -> int:
-        if scope_name == "global":              return 0
-        if scope_name.startswith("function:"): return 1
-        return min(len(scope_name.split(":")), 4)
+        if scope_name == "global":
+            return 0
+        if scope_name.startswith("function:"):
+            return 1
+        parts = scope_name.split(":")
+        return min(len(parts), 4)
 
     def _setup_builtins(self):
         self.builtins = {
@@ -221,27 +250,43 @@ class Interpreter:
                     scope.add(node.name)
                     scan_expr(node.value, scope)
                 elif isinstance(node, InputNode):
+                    # ── FIX: ask/hear defines the variable it saves into ──────
+                    scope.add(node.into)
+                elif isinstance(node, InputNode):
                     scope.add(node.into)
                 elif isinstance(node, UpdateNode):
                     if node.name not in scope:
-                        warnings.append(f"⚠️  Line {node.line}: Updating '{node.name}' but it was never defined.\n   Fix: store 0 into {node.name}")
+                        warnings.append(
+                            f"⚠️  Line {node.line}: Updating '{node.name}' but it was never defined.\n"
+                            f"   Fix: store 0 into {node.name}"
+                        )
                     scan_expr(node.value, scope)
                 elif isinstance(node, RaiseNode):
                     if node.name not in scope:
-                        warnings.append(f"⚠️  Line {node.line}: Raising '{node.name}' but it was never defined.\n   Fix: store 0 into {node.name}")
+                        warnings.append(
+                            f"⚠️  Line {node.line}: Raising '{node.name}' but it was never defined.\n"
+                            f"   Fix: store 0 into {node.name}"
+                        )
                 elif isinstance(node, LowerNode):
                     if node.name not in scope:
-                        warnings.append(f"⚠️  Line {node.line}: Lowering '{node.name}' but it was never defined.\n   Fix: store 0 into {node.name}")
+                        warnings.append(
+                            f"⚠️  Line {node.line}: Lowering '{node.name}' but it was never defined.\n"
+                            f"   Fix: store 0 into {node.name}"
+                        )
                 elif isinstance(node, OutputNode):
                     scan_expr(node.value, scope)
                 elif isinstance(node, BuildNode):
                     scope.add(node.name)
-                    scan(node.body, set(scope) | set(node.params))
+                    inner = set(scope) | set(node.params)
+                    scan(node.body, inner)
                 elif isinstance(node, DoThisNode):
                     scan(node.body, set(scope) | {"index"})
                 elif isinstance(node, GoThroughNode):
                     if node.iterable not in scope:
-                        warnings.append(f"⚠️  Line {node.line}: '{node.iterable}' used in loop but never defined.\n   Fix: store collection 1 and 2 and 3 into {node.iterable}")
+                        warnings.append(
+                            f"⚠️  Line {node.line}: '{node.iterable}' used in loop but never defined.\n"
+                            f"   Fix: store collection 1 and 2 and 3 into {node.iterable}"
+                        )
                     scan(node.body, set(scope) | {node.var})
                 elif isinstance(node, WhenNode):
                     scan_expr(node.condition, scope)
@@ -258,19 +303,25 @@ class Interpreter:
         def scan_expr(node, scope):
             if isinstance(node, IdentNode):
                 if node.name not in scope and node.name not in self.builtins:
-                    warnings.append(f"⚠️  Line {node.line}: '{node.name}' used but never defined.\n   Fix: store <value> into {node.name}")
+                    warnings.append(
+                        f"⚠️  Line {node.line}: '{node.name}' used but never defined.\n"
+                        f"   Fix: store <value> into {node.name}"
+                    )
             elif isinstance(node, BinOpNode):
                 scan_expr(node.left, scope)
-                if node.right: scan_expr(node.right, scope)
+                if node.right:
+                    scan_expr(node.right, scope)
             elif isinstance(node, UnaryOpNode):
                 scan_expr(node.operand, scope)
             elif isinstance(node, CompNode):
                 scan_expr(node.left, scope)
-                if node.right: scan_expr(node.right, scope)
+                if node.right:
+                    scan_expr(node.right, scope)
 
         scan(ast, defined)
         return warnings
 
+    # ── Run ────────────────────────────────────────────────────────────────────
     def run(self, ast, env=None):
         self.output_log        = []
         self.warnings          = self.precheck(ast)
@@ -298,18 +349,27 @@ class Interpreter:
         return self.warnings + self.output_log
 
     def _build_semantic_log(self, env):
-        self.semantic_log = [{
-            "header": ["Name","Type","Width","Value","Scope","Line"],
+        self.semantic_log = []
+        self.semantic_log.append({
+            "header": ["Name", "Type", "Width", "Value", "Scope", "Line"],
             "rows": [
-                [e.name, e.vtype, e.width, self._display(e.value), e.scope, str(e.line)]
+                [
+                    e.name,
+                    e.vtype,
+                    e.width,
+                    self._display(e.value),
+                    e.scope,
+                    str(e.line),
+                ]
                 for e in env.all_symbols().values()
-                if not callable(e.value)
+                if not isinstance(e.value, type(lambda: None))
             ]
-        }]
+        })
 
     def _exec_block(self, stmts, env):
         for s in stmts:
-            if s: self._exec(s, env)
+            if s:
+                self._exec(s, env)
 
     def _exec(self, node, env):
         self._line_count += 1
@@ -322,40 +382,63 @@ class Interpreter:
                 val = Decimal(str(val))
             if env.has_local(node.name):
                 env.assign(node.name, val)
+                if node.precise:
+                    entry = env.get_entry(node.name)
+                    if entry:
+                        entry.precise = True
             else:
                 env.set(node.name, val, node.precise, getattr(node, "line", 0))
             entry = env.get_entry(node.name)
-            if entry: self._record_symbol(entry)
+            if entry:
+                self._record_symbol(entry)
             self.trace_log.append(
-                f"{indent}Line {self._line_count:>3}  STORE    {node.name} = {self._display(val)}  [{self._width_of(val)}]  scope:{scope}"
+                f"{indent}Line {self._line_count:>3}  STORE    "
+                f"{node.name} = {self._display(val)}"
+                f"  [{self._width_of(val)}]  scope:{scope}"
             )
 
         elif isinstance(node, UpdateNode):
             if not env.has(node.name):
-                raise VoxLangError(f"Line {node.line}: Cannot update '{node.name}' — not defined.\n   Fix: store 0 into {node.name}")
+                raise VoxLangError(
+                    f"Line {node.line}: Cannot update '{node.name}' — not defined.\n"
+                    f"   Fix: store 0 into {node.name}"
+                )
             val = self._eval(node.value, env)
             env.assign(node.name, val)
             entry = env.get_entry(node.name)
-            if entry: self._record_symbol(entry)
-            self.trace_log.append(f"{indent}Line {self._line_count:>3}  UPDATE   {node.name} → {self._display(val)}  scope:{scope}")
+            if entry:
+                self._record_symbol(entry)
+            self.trace_log.append(
+                f"{indent}Line {self._line_count:>3}  UPDATE   "
+                f"{node.name} → {self._display(val)}  scope:{scope}"
+            )
 
         elif isinstance(node, RaiseNode):
             if not env.has(node.name):
-                raise VoxLangError(f"Line {node.line}: Cannot raise '{node.name}' — not defined.\n   Fix: store 0 into {node.name}")
+                raise VoxLangError(
+                    f"Line {node.line}: Cannot raise '{node.name}' — not defined.\n"
+                    f"   Fix: store 0 into {node.name}"
+                )
             current = env.get(node.name, getattr(node, "line", 0))
             amount  = self._eval(node.amount, env)
             self._assert_numbers(current, amount, "raise by")
             new_val = current + amount
             env.assign(node.name, new_val)
             entry = env.get_entry(node.name)
-            if entry: self._record_symbol(entry)
+            if entry:
+                self._record_symbol(entry)
             self.trace_log.append(
-                f"{indent}Line {self._line_count:>3}  RAISE    {node.name}: {self._display(current)} + {self._display(amount)} = {self._display(new_val)}  scope:{scope}"
+                f"{indent}Line {self._line_count:>3}  RAISE    "
+                f"{node.name}: {self._display(current)} + "
+                f"{self._display(amount)} = {self._display(new_val)}  scope:{scope}"
             )
 
         elif isinstance(node, LowerNode):
             if not env.has(node.name):
-                raise VoxLangError(f"Line {node.line}: Cannot lower '{node.name}' — not defined.\n   Fix: store 0 into {node.name}")
+                raise VoxLangError(
+                    f"Line {node.line}: Cannot lower '{node.name}' — not defined.\n"
+                    f"   Fix: store 0 into {node.name}"
+                )
             current = env.get(node.name, getattr(node, "line", 0))
             amount  = self._eval(node.amount, env)
             self._assert_numbers(current, amount, "lower by")
@@ -401,7 +484,9 @@ class Interpreter:
             val = self._eval(node.value, env)
             out = self._display(val)
             self.output_log.append(out)
-            self.trace_log.append(f"{indent}Line {self._line_count:>3}  OUTPUT   \"{out}\"  scope:{scope}")
+            self.trace_log.append(
+                f"{indent}Line {self._line_count:>3}  OUTPUT   \"{out}\"  scope:{scope}"
+            )
 
         elif isinstance(node, InputNode):
             if self.input_hook is not None:
@@ -414,15 +499,20 @@ class Interpreter:
             else:
                 env.set(node.into, result)
             entry = env.get_entry(node.into)
-            if entry: self._record_symbol(entry)
+            if entry:
+                self._record_symbol(entry)
             self.trace_log.append(
-                f"{indent}Line {self._line_count:>3}  INPUT    asked \"{node.prompt}\" → stored in {node.into} = {self._display(result)}  [{self._width_of(result)}]  scope:{scope}"
+                f"{indent}Line {self._line_count:>3}  INPUT    "
+                f"asked \"{node.prompt}\" → stored in {node.into} = {self._display(result)}"
+                f"  [{self._width_of(result)}]  scope:{scope}"
             )
 
         elif isinstance(node, BuildNode):
             env.set(node.name, node)
             self.trace_log.append(
-                f"{indent}Line {self._line_count:>3}  BUILD    function '{node.name}' defined  params:[{', '.join(node.params)}]  scope:{scope}"
+                f"{indent}Line {self._line_count:>3}  BUILD    "
+                f"function '{node.name}' defined  "
+                f"params:[{', '.join(node.params)}]  scope:{scope}"
             )
 
         elif isinstance(node, UseNode):
@@ -436,14 +526,20 @@ class Interpreter:
             else:
                 env.set(node.name, value)
             entry = env.get_entry(node.name)
-            if entry: self._record_symbol(entry)
+            if entry:
+                self._record_symbol(entry)
             self.trace_log.append(
-                f"{indent}Line {self._line_count:>3}  CAPTURE  result of {node.func}() → {node.name} = {self._display(result)}  scope:{scope}"
+                f"{indent}Line {self._line_count:>3}  CAPTURE  "
+                f"result of {node.func}() → {node.name} = "
+                f"{self._display(result)}  scope:{scope}"
             )
 
         elif isinstance(node, DoThisNode):
             count = int(self._eval(node.count, env))
-            self.trace_log.append(f"{indent}Line {self._line_count:>3}  LOOP     do this {count} times  scope:{scope}")
+            self.trace_log.append(
+                f"{indent}Line {self._line_count:>3}  LOOP     "
+                f"do this {count} times  scope:{scope}"
+            )
             for i in range(count):
                 child = Environment(env, scope_name=f"loop:{i+1}")
                 child.set("index", i + 1)
@@ -453,8 +549,13 @@ class Interpreter:
 
         elif isinstance(node, GoThroughNode):
             lst = env.get(node.iterable, getattr(node, "line", 0))
-            if not isinstance(lst, list): lst = list(lst)
-            self.trace_log.append(f"{indent}Line {self._line_count:>3}  FOREACH  go through every {node.var} in {node.iterable} ({len(lst)} items)  scope:{scope}")
+            if not isinstance(lst, list):
+                lst = list(lst)
+            self.trace_log.append(
+                f"{indent}Line {self._line_count:>3}  FOREACH  "
+                f"go through every {node.var} in {node.iterable} "
+                f"({len(lst)} items)  scope:{scope}"
+            )
             for i, item in enumerate(lst):
                 child = Environment(env, scope_name=f"foreach:{node.iterable}")
                 child.set(node.var, item, line=getattr(node, "line", 0))
@@ -464,7 +565,10 @@ class Interpreter:
 
         elif isinstance(node, KeepGoingNode):
             guard = 0
-            self.trace_log.append(f"{indent}Line {self._line_count:>3}  WHILE    keep going while condition  scope:{scope}")
+            self.trace_log.append(
+                f"{indent}Line {self._line_count:>3}  WHILE    "
+                f"keep going while condition  scope:{scope}"
+            )
             while self._eval_cond(node.condition, env):
                 guard += 1
                 if guard > 10000:
@@ -479,7 +583,9 @@ class Interpreter:
         elif isinstance(node, WhenNode):
             result = self._eval_cond(node.condition, env)
             self.trace_log.append(
-                f"{indent}Line {self._line_count:>3}  WHEN     condition → {'true, taking then-branch' if result else 'false, taking otherwise-branch'}  scope:{scope}"
+                f"{indent}Line {self._line_count:>3}  WHEN     "
+                f"condition → {'true, taking then-branch' if result else 'false, taking otherwise-branch'}  "
+                f"scope:{scope}"
             )
             if result:
                 self._exec_block(node.then_block, Environment(env, scope_name="when:then"))
@@ -488,46 +594,71 @@ class Interpreter:
 
         elif isinstance(node, ReturnNode):
             val = self._eval(node.value, env)
-            self.trace_log.append(f"{indent}Line {self._line_count:>3}  RETURN   {self._display(val)}  scope:{scope}")
+            self.trace_log.append(
+                f"{indent}Line {self._line_count:>3}  RETURN   "
+                f"{self._display(val)}  scope:{scope}"
+            )
             raise ReturnSignal(val)
 
         elif isinstance(node, SolveNode):
             result = self._solve(node, env)
             env.set(node.var, result, False, getattr(node, "line", 0))
             entry = env.get_entry(node.var)
-            if entry: self._record_symbol(entry)
-            self.trace_log.append(f"{indent}Line {self._line_count:>3}  SOLVE    {node.var} = {self._display(result)}  scope:{scope}")
+            if entry:
+                self._record_symbol(entry)
+            self.trace_log.append(
+                f"{indent}Line {self._line_count:>3}  SOLVE    "
+                f"{node.var} = {self._display(result)}  scope:{scope}"
+            )
 
         elif isinstance(node, MathBlockNode):
-            self.trace_log.append(f"{indent}Line {self._line_count:>3}  MATHBLOCK  entering math block  scope:{scope}")
+            self.trace_log.append(
+                f"{indent}Line {self._line_count:>3}  MATHBLOCK  entering math block  scope:{scope}"
+            )
             self._exec_block(node.body, env)
 
         elif isinstance(node, CommentNode):
-            self.trace_log.append(f"{indent}Line {self._line_count:>3}  COMMENT  -- {node.text}")
+            self.trace_log.append(
+                f"{indent}Line {self._line_count:>3}  COMMENT  -- {node.text}"
+            )
 
+    # ── Function call ──────────────────────────────────────────────────────────
     def _call(self, name, arg_nodes, env, line=0):
         args = [self._eval(a, env) for a in arg_nodes]
         self.trace_log.append(
-            f"{'  ' * env.depth}  CALL     {name}({', '.join(self._display(a) for a in args)})  scope:{env.scope_name}"
+            f"{'  ' * env.depth}  CALL     {name}("
+            f"{', '.join(self._display(a) for a in args)})  scope:{env.scope_name}"
         )
         if name in self.builtins:
             try:
                 result = self.builtins[name](args)
-                self.trace_log.append(f"{'  ' * env.depth}  RESULT   {name}() → {self._display(result)}")
+                self.trace_log.append(
+                    f"{'  ' * env.depth}  RESULT   {name}() → {self._display(result)}"
+                )
                 return result
             except Exception as e:
                 raise VoxLangError(f"Line {line}: Error in '{name}': {e}")
 
-        fn_entry = env.get_entry(name)
-        if fn_entry is None:
-            raise VoxLangError(f"Line {line}: '{name}' is not defined.\n   Fix: build {name} using ... done")
-        fn = fn_entry.value
+        try:
+            fn = env.get_entry(name)
+            if fn is None:
+                raise VoxLangError(
+                    f"Line {line}: '{name}' is not defined.\n"
+                    f"   Fix: build {name} using ... done"
+                )
+            fn = fn.value
+        except VoxLangError:
+            raise VoxLangError(
+                f"Line {line}: '{name}' is not defined.\n"
+                f"   Fix: build {name} using ... done"
+            )
 
         if not isinstance(fn, BuildNode):
             raise VoxLangError(f"Line {line}: '{name}' is not a function.")
         if len(args) != len(fn.params):
             raise VoxLangError(
-                f"Line {line}: '{name}' needs {len(fn.params)} input(s) ({', '.join(fn.params)}) but you gave {len(args)}."
+                f"Line {line}: '{name}' needs {len(fn.params)} input(s) "
+                f"({', '.join(fn.params)}) but you gave {len(args)}."
             )
 
         child = Environment(self.global_env, scope_name=f"function:{name}", is_function=True)
@@ -541,21 +672,13 @@ class Interpreter:
             return r.value
         return None
 
+    # ── Expression evaluator ───────────────────────────────────────────────────
     def _eval(self, node, env):
         if isinstance(node, LiteralNode):
             return node.value
 
         if isinstance(node, IdentNode):
             return env.get(node.name, node.line)
-
-        if isinstance(node, IndexNode):
-            coll = env.get(node.collection, node.line)
-            idx  = int(self._eval(node.index, env))
-            if not isinstance(coll, (list, str)):
-                raise VoxLangError(f"Line {node.line}: '{node.collection}' is not indexable.")
-            if idx < 0 or idx >= len(coll):
-                raise VoxLangError(f"Line {node.line}: Index {idx} is out of range (size {len(coll)}).")
-            return coll[idx]
 
         if isinstance(node, UnaryOpNode):
             operand = self._eval(node.operand, env)
@@ -573,15 +696,23 @@ class Interpreter:
                 if isinstance(l, str) or isinstance(r, str):
                     return str(l) + str(r)
                 return l + r
-            if node.op == "-":   self._assert_numbers(l, r, "-");    return l - r
-            if node.op == "*":   self._assert_numbers(l, r, "*");    return l * r
+            if node.op == "-":
+                self._assert_numbers(l, r, "-"); return l - r
+            if node.op == "*":
+                self._assert_numbers(l, r, "*"); return l * r
             if node.op == "/":
                 self._assert_numbers(l, r, "/")
-                if r == 0: raise VoxLangError("Division by zero.\n   Dividing by zero is undefined in mathematics.")
+                if r == 0:
+                    raise VoxLangError(
+                        "Division by zero.\n"
+                        "   Dividing by zero is undefined in mathematics.\n"
+                        "   Change the divisor to a non-zero number."
+                    )
                 return l / r
             if node.op == "%":
                 self._assert_numbers(l, r, "%")
-                if r == 0: raise VoxLangError("Modulo by zero is undefined.")
+                if r == 0:
+                    raise VoxLangError("Modulo by zero is undefined.")
                 return l % r
             if node.op == "**": self._assert_numbers(l, r, "to the power of"); return l ** r
             if node.op == "<<": return int(l) << int(r)
@@ -638,7 +769,7 @@ class Interpreter:
             return round(math.pi * r * r, 10)
         if node.name == "hypotenuse":
             a = float(kw.get("a", 0)); b = float(kw.get("b", 0))
-            return round(math.sqrt(a**2 + b**2), 10)
+            return round(math.sqrt(a ** 2 + b ** 2), 10)
         if node.name == "volume_sphere":
             r = float(kw.get("radius", 0))
             return round((4/3) * math.pi * r**3, 10)
@@ -653,7 +784,37 @@ class Interpreter:
         tokens = node.lhs_tokens
         rhs    = self._eval(node.rhs, env)
         coeff2 = 0.0; coeff1 = 0.0; const = 0.0
+        coeff2 = 0.0; coeff1 = 0.0; const = 0.0
         i = 0
+
+        def _skip_times(idx):
+            """Skip over optional * or 'times' at idx; return new idx."""
+            if idx < len(tokens) and tokens[idx].value in ("*", "times"):
+                return idx + 1
+            return idx
+
+        def _is_coeff_var_squared(idx):
+            if tokens[idx].type != "NUMBER": return False
+            n = _skip_times(idx + 1)
+            if n >= len(tokens) or tokens[n].value != var: return False
+            n2 = n + 1
+            return n2 < len(tokens) and tokens[n2].value in ("squared", "^")
+
+        def _is_coeff_var(idx):
+            if tokens[idx].type != "NUMBER": return False
+            n = _skip_times(idx + 1)
+            if n >= len(tokens) or tokens[n].value != var: return False
+            n2 = n + 1
+            return not (n2 < len(tokens) and tokens[n2].value in ("squared", "^"))
+
+        def _len_coeff_var_squared(idx):
+            n = _skip_times(idx + 1)
+            return (n + 2) - idx   # var + squared
+
+        def _len_coeff_var(idx):
+            n = _skip_times(idx + 1)
+            return (n + 1) - idx   # var
+
 
         def _skip_times(idx):
             if idx < len(tokens) and tokens[idx].value in ("*","times"):
@@ -684,14 +845,54 @@ class Interpreter:
 
         while i < len(tokens):
             t = tokens[i]
+
+            # NUMBER [* | times] var [squared | ^]
+            if _is_coeff_var_squared(i):
+                coeff2 += float(t.value)
+                i += _len_coeff_var_squared(i); continue
+
+            # NUMBER [* | times] var
+            if _is_coeff_var(i):
+                coeff1 += float(t.value)
+                i += _len_coeff_var(i); continue
+
+            # var squared
             if _is_coeff_var_squared(i):
                 coeff2 += float(t.value); i += _len_coeff_var_squared(i); continue
             if _is_coeff_var(i):
                 coeff1 += float(t.value); i += _len_coeff_var(i); continue
             if t.value == var:
+                if i + 1 < len(tokens) and tokens[i+1].value in ("squared", "^"):
+                    coeff2 += 1.0; i += 2; continue
                 if i + 1 < len(tokens) and tokens[i+1].value in ("squared","^"):
                     coeff2 += 1.0; i += 2; continue
                 else:
+                    coeff1 += 1.0; i += 1; continue
+
+            # plus / +
+            if t.value in ("plus", "+") and i + 1 < len(tokens):
+                nxt_i = i + 1
+                if tokens[nxt_i].type == "NUMBER":
+                    if _is_coeff_var_squared(nxt_i):
+                        coeff2 += float(tokens[nxt_i].value)
+                        i = nxt_i + _len_coeff_var_squared(nxt_i); continue
+                    if _is_coeff_var(nxt_i):
+                        coeff1 += float(tokens[nxt_i].value)
+                        i = nxt_i + _len_coeff_var(nxt_i); continue
+                    const += float(tokens[nxt_i].value); i += 2; continue
+
+            # minus / -
+            if t.value in ("minus", "-") and i + 1 < len(tokens):
+                nxt_i = i + 1
+                if tokens[nxt_i].type == "NUMBER":
+                    if _is_coeff_var_squared(nxt_i):
+                        coeff2 -= float(tokens[nxt_i].value)
+                        i = nxt_i + _len_coeff_var_squared(nxt_i); continue
+                    if _is_coeff_var(nxt_i):
+                        coeff1 -= float(tokens[nxt_i].value)
+                        i = nxt_i + _len_coeff_var(nxt_i); continue
+                    const -= float(tokens[nxt_i].value); i += 2; continue
+
                     coeff1 += 1.0; i += 1; continue
             if t.value in ("plus","+") and i + 1 < len(tokens):
                 nxt_i = i + 1
