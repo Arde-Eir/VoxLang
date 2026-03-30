@@ -26,7 +26,8 @@ export class VoiceCapture {
     this.onError       = opts.onError       || (() => {});
     this.onStateChange = opts.onStateChange || (() => {});
     this.getContext    = opts.getContext     || (() => '');
-    this.apiBase       = (opts.apiBase || 'http://localhost:8000').replace(/\/$/, '');
+    const defaultBase = window.location.origin; // Dynamically gets your Vercel URL
+this.apiBase = (opts.apiBase || defaultBase).replace(/\/$/, '');
 
     this._recorder     = null;
     this._stream       = null;
