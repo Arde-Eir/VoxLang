@@ -1,0 +1,7 @@
+*.mp4
+*.pdf
+docs/
+shared/__pycache__/
+backend/__pycache__/
+.env
+.git
